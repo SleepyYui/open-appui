@@ -52,3 +52,4 @@ app.*.map.json
 .cursorignore
 .cursorignorerules
 .cursorignorerules
+dev-submodules/open-webui/
