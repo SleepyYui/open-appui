@@ -5,11 +5,15 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../core/api/openwebui_client.dart';
 import '../widgets/chat_list_drawer.dart';
 import '../widgets/chat_input_bar.dart';
+import '../widgets/reasoning_collapsible.dart';
+import '../widgets/shimmers.dart';
+import 'package:shimmer/shimmer.dart';
 
 class ChatRoomScreen extends ConsumerStatefulWidget {
   const ChatRoomScreen({super.key, this.chatId});
@@ -27,6 +31,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   String? _selectedModelId;
   List<Map<String, dynamic>> _models = const [];
   List<_Message> _messages = [];
+  final Map<int, _ReasoningMeta> _reasoningByIndex = {};
   bool _sending = false;
   final _input = TextEditingController();
   String? _chatId;
@@ -34,6 +39,35 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   // Cache model icons to prevent re-decoding/reloading on every rebuild/stream chunk
   final Map<String, ImageProvider?> _modelIconCache = {};
   String? _assistantPendingId;
+  String? _lastUserMsgId;
+  String? _lastAssistantMsgId;
+  bool _assistantStarted = false;
+
+  bool _isThinking = false;
+  bool _loadingChat = false;
+
+  ImageProvider? _modelLogo(String? modelId) {
+    if (modelId == null) return null;
+    if (_modelIconCache.containsKey(modelId)) return _modelIconCache[modelId];
+    final m = _models.firstWhere(
+      (e) => (e['id'] as String?) == modelId,
+      orElse: () => const {},
+    );
+    final url = (m['info']?['meta']?['profile_image_url'] as String?) ?? '';
+    ImageProvider? img;
+    if (url.startsWith('http')) {
+      img = NetworkImage(url);
+    } else if (url.startsWith('data:image')) {
+      try {
+        final base64Str = url.substring(url.indexOf(',') + 1);
+        img = MemoryImage(base64Decode(base64Str));
+      } catch (_) {
+        img = null;
+      }
+    }
+    _modelIconCache[modelId] = img;
+    return img;
+  }
 
   @override
   void initState() {
@@ -42,7 +76,20 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
   }
 
+  @override
+  void didUpdateWidget(covariant ChatRoomScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.chatId != widget.chatId) {
+      setState(() {
+        _chatId = widget.chatId;
+        _messages = [];
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+    }
+  }
+
   Future<void> _load() async {
+    setState(() => _loadingChat = true);
     final client = await ref.read(openWebUIClientProvider.future);
     final models = await client.listModels();
     setState(() {
@@ -63,31 +110,43 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
           );
       setState(() {
         _messages =
-            ordered
-                .map(
-                  (m) => _Message(
-                    role: m['role'] as String? ?? 'user',
-                    content: m['content'] as String? ?? '',
-                  ),
-                )
-                .toList();
+            ordered.map((node) {
+              final role = node['role'] as String? ?? 'user';
+              final content = node['content'] as String? ?? '';
+              final modelId = node['model'] as String?;
+              final modelName = node['modelName'] as String?;
+              return _Message(
+                role: role,
+                content: content,
+                modelId: role == 'assistant' ? modelId : null,
+                modelName: role == 'assistant' ? (modelName ?? modelId) : null,
+              );
+            }).toList();
       });
     }
+    if (mounted) setState(() => _loadingChat = false);
   }
 
   Future<void> _send() async {
     final text = _input.text.trim();
     if (text.isEmpty || _selectedModelId == null) return;
-    setState(() => _sending = true);
+    setState(() {
+      _sending = true;
+      _assistantStarted = false;
+      _isThinking = true;
+    });
     final client = await ref.read(openWebUIClientProvider.future);
 
-    // Ensure chat exists and mirror WebUI first-message flow.
-    // IMPORTANT: Reuse the same chat id across subsequent sends; do not recreate.
+    // Ensure chat exists and mirror WebUI message/linking flow
+    // Generate fresh message ids for this turn
+    final now = DateTime.now();
+    final modelId = _selectedModelId!;
+    final userMsgId = const Uuid().v4();
+    final assistantMsgId = const Uuid().v4();
+    final tsSec = (now.millisecondsSinceEpoch / 1000).floor();
+
     if (_chatId == null) {
-      final userMsgId = const Uuid().v4();
-      final assistantMsgId = const Uuid().v4();
-      final now = DateTime.now();
-      final modelId = _selectedModelId!;
+      // Create new chat seeded with the first user message
       final payloadChat = {
         'id': const Uuid().v4(),
         'title': 'New Chat',
@@ -102,7 +161,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
               'childrenIds': [],
               'role': 'user',
               'content': text,
-              'timestamp': (now.millisecondsSinceEpoch / 1000).floor(),
+              'timestamp': tsSec,
               'models': [modelId],
             },
           },
@@ -114,85 +173,85 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
             'childrenIds': [],
             'role': 'user',
             'content': text,
-            'timestamp': (now.millisecondsSinceEpoch / 1000).floor(),
+            'timestamp': tsSec,
             'models': [modelId],
           },
         ],
         'tags': [],
         'timestamp': now.millisecondsSinceEpoch,
       };
-
       final created = await client.createChat(chat: payloadChat);
-      _chatId = created['id'] as String?;
-      // safety: if web returns nested chat.chat.id as authoritative
-      _chatId ??= (created['chat']?['id'] as String?);
+      _chatId = created['id'] as String? ?? (created['chat']?['id'] as String?);
 
-      // Mirror WebUI: pre-create assistant stub and link to user message, so that
-      // the completions stream can reference the assistant id.
+      // Pre-create assistant stub linked to user message
       try {
         final modelObj = _models.firstWhere(
           (m) => m['id'] == modelId,
           orElse: () => const {},
         );
         final modelName = (modelObj['name'] as String?) ?? modelId;
-        final updatePayload = {
-          'models': [modelId],
-          'history': {
-            'currentId': assistantMsgId,
-            'messages': {
-              userMsgId: {
-                'id': userMsgId,
-                'parentId': null,
-                'childrenIds': [assistantMsgId],
-                'role': 'user',
-                'content': text,
-                'timestamp': (now.millisecondsSinceEpoch / 1000).floor(),
-                'models': [modelId],
-              },
-              assistantMsgId: {
-                'parentId': userMsgId,
-                'id': assistantMsgId,
-                'childrenIds': [],
-                'role': 'assistant',
-                'content': '',
-                'model': modelId,
-                'modelName': modelName,
-                'modelIdx': 0,
-                'timestamp': (now.millisecondsSinceEpoch / 1000).floor(),
-              },
-            },
-          },
-          'messages': [
-            {
-              'id': userMsgId,
-              'parentId': null,
-              'childrenIds': [assistantMsgId],
-              'role': 'user',
-              'content': text,
-              'timestamp': (now.millisecondsSinceEpoch / 1000).floor(),
-              'models': [modelId],
-            },
-            {
-              'parentId': userMsgId,
-              'id': assistantMsgId,
-              'childrenIds': [],
-              'role': 'assistant',
-              'content': '',
-              'model': modelId,
-              'modelName': modelName,
-              'modelIdx': 0,
-              'timestamp': (now.millisecondsSinceEpoch / 1000).floor(),
-            },
-          ],
-          'params': {},
-          'files': [],
-        };
         if (_chatId != null) {
-          await client.updateChat(id: _chatId!, chat: updatePayload);
-          _assistantPendingId = assistantMsgId;
+          await client.updateChat(
+            id: _chatId!,
+            chat: {
+              'models': [modelId],
+              'history': {
+                'currentId': assistantMsgId,
+                'messages': {
+                  userMsgId: {
+                    'id': userMsgId,
+                    'parentId': null,
+                    'childrenIds': [assistantMsgId],
+                    'role': 'user',
+                    'content': text,
+                    'timestamp': tsSec,
+                    'models': [modelId],
+                  },
+                  assistantMsgId: {
+                    'parentId': userMsgId,
+                    'id': assistantMsgId,
+                    'childrenIds': [],
+                    'role': 'assistant',
+                    'content': '',
+                    'model': modelId,
+                    'modelName': modelName,
+                    'modelIdx': 0,
+                    'timestamp': tsSec,
+                  },
+                },
+              },
+              'messages': [
+                {
+                  'id': userMsgId,
+                  'parentId': null,
+                  'childrenIds': [assistantMsgId],
+                  'role': 'user',
+                  'content': text,
+                  'timestamp': tsSec,
+                  'models': [modelId],
+                },
+                {
+                  'parentId': userMsgId,
+                  'id': assistantMsgId,
+                  'childrenIds': [],
+                  'role': 'assistant',
+                  'content': '',
+                  'model': modelId,
+                  'modelName': modelName,
+                  'modelIdx': 0,
+                  'timestamp': tsSec,
+                },
+              ],
+              'params': {},
+              'files': [],
+            },
+          );
         }
       } catch (_) {}
     }
+    // Track ids for this turn regardless of new/existing chat
+    _assistantPendingId = assistantMsgId;
+    _lastUserMsgId = userMsgId;
 
     // Append user message locally
     setState(() {
@@ -233,17 +292,59 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                   (choices.first as Map)['message'];
               final content =
                   (delta is Map) ? (delta['content'] as String? ?? '') : '';
+              final think =
+                  (delta is Map)
+                      ? (delta['reasoning_content'] as String? ??
+                          (delta['reasoning'] as String? ??
+                              (delta['thinking'] as String? ?? '')))
+                      : '';
               if (content.isNotEmpty) {
+                if (!_assistantStarted) {
+                  setState(() {
+                    _assistantStarted = true;
+                    _isThinking = false;
+                  });
+                }
                 setState(() {
                   if (_messages.isNotEmpty &&
                       _messages.last.role == 'assistant') {
+                    final last = _messages.last;
                     _messages[_messages.length - 1] = _Message(
                       role: 'assistant',
-                      content: _messages.last.content + content,
+                      content: last.content + content,
+                      modelId: last.modelId ?? _selectedModelId,
+                      modelName:
+                          last.modelName ??
+                          _models.firstWhere(
+                                (m) => m['id'] == _selectedModelId,
+                                orElse: () => const {},
+                              )['name']
+                              as String?,
                     );
                   } else {
-                    _messages = List.of(_messages)
-                      ..add(_Message(role: 'assistant', content: content));
+                    final modelObj = _models.firstWhere(
+                      (m) => m['id'] == _selectedModelId,
+                      orElse: () => const {},
+                    );
+                    _messages = List.of(_messages)..add(
+                      _Message(
+                        role: 'assistant',
+                        content: content,
+                        modelId: _selectedModelId,
+                        modelName:
+                            (modelObj['name'] as String?) ?? _selectedModelId,
+                      ),
+                    );
+                  }
+                  // Attach/accumulate reasoning for this assistant index
+                  if (think.isNotEmpty) {
+                    final aiIndex = _messages.length - 1;
+                    final prev = _reasoningByIndex[aiIndex];
+                    _reasoningByIndex[aiIndex] = _ReasoningMeta(
+                      text: (prev?.text ?? '') + think,
+                      done: prev?.done ?? false,
+                      durationSeconds: prev?.durationSeconds,
+                    );
                   }
                 });
                 // keep view pinned to bottom
@@ -265,30 +366,155 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
       // After stream completes, call chat/completed & update chat with final messages
       try {
         final nowTs = (DateTime.now().millisecondsSinceEpoch / 1000).floor();
-        final msgs = <Map<String, dynamic>>[];
-        for (final m in _messages) {
-          msgs.add({
-            'id': const Uuid().v4(),
-            'role': m.role,
-            'content': m.content,
+        // Build minimal chain using actual ids for this turn
+        final chain = <Map<String, dynamic>>[
+          {
+            'id': _lastUserMsgId,
+            'role': 'user',
+            'content': _messages.firstWhere((m) => m.role == 'user').content,
             'timestamp': nowTs,
-          });
+          },
+          {
+            'id': _assistantPendingId,
+            'role': 'assistant',
+            'content':
+                _messages
+                    .where((m) => m.role == 'assistant')
+                    .map((m) => m.content)
+                    .join(),
+            'timestamp': nowTs,
+          },
+        ];
+
+        // Attach model item and session id like WebUI
+        Map<String, dynamic>? modelItem;
+        try {
+          modelItem = _models.firstWhere((m) => m['id'] == _selectedModelId);
+        } catch (_) {
+          modelItem =
+              _selectedModelId == null ? null : {'id': _selectedModelId};
         }
+        String? sessionId;
+        try {
+          final sess = await client.getSessionUser();
+          sessionId = sess['socket_id'] as String?;
+        } catch (_) {}
+
         await client.postChatCompleted({
           'model': _selectedModelId,
-          'messages': msgs,
-          'model_item':
-              _selectedModelId == null ? null : {'id': _selectedModelId},
+          'messages': chain,
+          if (modelItem != null) 'model_item': modelItem,
           'chat_id': _chatId,
-          'id': const Uuid().v4(),
+          if (sessionId != null) 'session_id': sessionId,
+          'id': _assistantPendingId,
         });
+
+        // Also persist final assistant message content back to chat history including ALL prior messages
+        if (_chatId != null &&
+            _assistantPendingId != null &&
+            _lastUserMsgId != null) {
+          final modelId = _selectedModelId ?? '';
+          final modelObj = _models.firstWhere(
+            (m) => m['id'] == modelId,
+            orElse: () => const {},
+          );
+          final modelName = (modelObj['name'] as String?) ?? modelId;
+          final assistantContent =
+              _messages
+                  .where((m) => m.role == 'assistant')
+                  .map((m) => m.content)
+                  .join();
+          final ts = (DateTime.now().millisecondsSinceEpoch / 1000).floor();
+          // Fetch existing chat to merge full arrays/maps
+          final existing = await client.getChatById(_chatId!);
+          final chatMap = Map<String, dynamic>.from(existing['chat'] as Map);
+          final existingMessages = List<Map<String, dynamic>>.from(
+            (chatMap['messages'] as List? ?? []).cast<Map<String, dynamic>>(),
+          );
+          // Remove stub assistant, if present
+          final merged =
+              existingMessages
+                  .where((m) => (m['id'] ?? '') != _assistantPendingId)
+                  .toList();
+          // Ensure user node exists
+          final userExists = merged.any((m) => m['id'] == _lastUserMsgId);
+          if (!userExists) {
+            merged.add({
+              'id': _lastUserMsgId,
+              'parentId': _lastAssistantMsgId,
+              'childrenIds': [_assistantPendingId],
+              'role': 'user',
+              'content': _messages.firstWhere((m) => m.role == 'user').content,
+              'timestamp': ts,
+              'models': [if (modelId.isNotEmpty) modelId],
+            });
+          }
+          // Add final assistant node
+          merged.add({
+            'parentId': _lastUserMsgId,
+            'id': _assistantPendingId,
+            'childrenIds': [],
+            'role': 'assistant',
+            'content': assistantContent,
+            'model': modelId,
+            'modelName': modelName,
+            'modelIdx': 0,
+            'timestamp': ts,
+            'done': true,
+          });
+
+          // Merge history map
+          final historyMessages = Map<String, dynamic>.from(
+            (chatMap['history']?['messages'] as Map?) ?? {},
+          );
+          historyMessages[_lastUserMsgId!] = {
+            'id': _lastUserMsgId,
+            'parentId': _lastAssistantMsgId,
+            'childrenIds': [_assistantPendingId],
+            'role': 'user',
+            'content': _messages.firstWhere((m) => m.role == 'user').content,
+            'timestamp': ts,
+            'models': [if (modelId.isNotEmpty) modelId],
+          };
+          historyMessages[_assistantPendingId!] = {
+            'parentId': _lastUserMsgId,
+            'id': _assistantPendingId,
+            'childrenIds': [],
+            'role': 'assistant',
+            'content': assistantContent,
+            'model': modelId,
+            'modelName': modelName,
+            'modelIdx': 0,
+            'timestamp': ts,
+            'done': true,
+          };
+
+          await client.updateChat(
+            id: _chatId!,
+            chat: {
+              'models': [if (modelId.isNotEmpty) modelId],
+              'messages': merged,
+              'history': {
+                'messages': historyMessages,
+                'currentId': _assistantPendingId,
+              },
+              'params': chatMap['params'] ?? {},
+              'files': chatMap['files'] ?? [],
+            },
+          );
+          _lastAssistantMsgId = _assistantPendingId;
+        }
       } catch (_) {}
     } catch (e) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Error: $e')));
     } finally {
-      if (mounted) setState(() => _sending = false);
+      if (mounted)
+        setState(() {
+          _sending = false;
+          _isThinking = false;
+        });
     }
   }
 
@@ -296,18 +522,29 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        // Always show menu to keep drawer accessible when switching between chats
         leading: Builder(
           builder:
               (context) => IconButton(
                 icon: const Icon(Icons.menu),
                 onPressed: () => Scaffold.of(context).openDrawer(),
+                tooltip: 'Open menu',
               ),
         ),
-        title: _ModelSelector(
-          models: _models,
-          selectedId: _selectedModelId,
-          iconCache: _modelIconCache,
-          onChanged: (id) => setState(() => _selectedModelId = id),
+        title: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 200),
+          switchInCurve: Curves.easeOut,
+          switchOutCurve: Curves.easeIn,
+          child:
+              _models.isEmpty
+                  ? const _ModelSelectorPlaceholder()
+                  : _ModelSelector(
+                    key: const ValueKey('modelSelector'),
+                    models: _models,
+                    selectedId: _selectedModelId,
+                    iconCache: _modelIconCache,
+                    onChanged: (id) => setState(() => _selectedModelId = id),
+                  ),
         ),
         centerTitle: true,
         actions: [
@@ -348,6 +585,9 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
               return PopupMenuButton<String>(
                 tooltip: 'Account',
                 offset: const Offset(0, 40),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
                 itemBuilder:
                     (ctx) => [
                       const PopupMenuItem(
@@ -386,19 +626,30 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                       const PopupMenuDivider(),
                       PopupMenuItem(
                         enabled: false,
-                        child: Row(
-                          children: [
-                            const Icon(
-                              Icons.circle,
-                              color: Colors.green,
-                              size: 10,
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              'Active Users: 1',
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                          ],
+                        child: FutureBuilder<int>(
+                          future: ref
+                              .read(openWebUIClientProvider.future)
+                              .then((c) => c.getActiveUsersCount()),
+                          builder: (context, snap) {
+                            final count = snap.data ?? 0;
+                            return Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const _PresenceDot(),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'Active: $count',
+                                  style: Theme.of(
+                                    context,
+                                  ).textTheme.labelSmall?.copyWith(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurface.withOpacity(0.70),
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
                         ),
                       ),
                     ],
@@ -410,17 +661,40 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                     await client.signOut();
                     if (context.mounted)
                       Navigator.of(context).popUntil((_) => true);
+                  } else if (v == 'settings') {
+                    if (context.mounted) context.push('/app/settings');
+                  } else if (v == 'archived') {
+                    if (context.mounted) context.push('/app/archived');
+                  } else if (v == 'admin') {
+                    if (context.mounted) context.push('/app/admin');
                   }
                 },
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: CircleAvatar(
-                    radius: 14,
-                    backgroundImage: imageProvider,
-                    child:
-                        imageProvider == null
-                            ? const Icon(Icons.person_outline, size: 18)
-                            : null,
+                  child: Material(
+                    color: Colors.transparent,
+                    shape: const CircleBorder(),
+                    child: InkWell(
+                      customBorder: const CircleBorder(),
+                      onTap: null,
+                      child: Padding(
+                        padding: const EdgeInsets.all(2),
+                        child: CircleAvatar(
+                          radius: 16,
+                          backgroundImage: imageProvider,
+                          backgroundColor:
+                              imageProvider == null
+                                  ? Theme.of(
+                                    context,
+                                  ).colorScheme.surfaceVariant.withOpacity(0.5)
+                                  : null,
+                          child:
+                              imageProvider == null
+                                  ? const Icon(Icons.person_outline, size: 18)
+                                  : null,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               );
@@ -433,39 +707,24 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
         children: [
           Expanded(
             child:
-                _messages.isEmpty
-                    ? ListView.builder(
+                _loadingChat
+                    ? ListView.separated(
                       padding: const EdgeInsets.all(12),
-                      itemCount: 6,
+                      itemCount: 8,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
                       itemBuilder:
-                          (context, i) => Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            child: Align(
-                              alignment:
-                                  i.isEven
-                                      ? Alignment.centerLeft
-                                      : Alignment.centerRight,
-                              child: Container(
-                                height: 16,
-                                width:
-                                    MediaQuery.of(context).size.width *
-                                    (0.4 + (i % 3) * 0.15),
-                                decoration: BoxDecoration(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .surfaceVariant
-                                      .withOpacity(0.35),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                              ),
-                            ),
-                          ),
+                          (context, i) => const ShimmerLine(height: 12),
                     )
+                    : _messages.isEmpty
+                    ? const _WelcomePlaceholder()
                     : ListView.builder(
                       controller: _scroll,
                       padding: const EdgeInsets.all(12),
-                      itemCount: _messages.length,
+                      itemCount: _messages.length + (_isThinking ? 1 : 0),
                       itemBuilder: (context, idx) {
+                        if (_isThinking && idx == _messages.length) {
+                          return const _ThinkingBubble();
+                        }
                         final m = _messages[idx];
                         final isUser = m.role == 'user';
                         if (isUser) {
@@ -479,7 +738,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                                     Theme.of(
                                       context,
                                     ).colorScheme.primaryContainer,
-                                borderRadius: BorderRadius.circular(12),
+                                borderRadius: BorderRadius.circular(16),
                               ),
                               child: Text(m.content),
                             ),
@@ -492,7 +751,58 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                                 vertical: 8,
                                 horizontal: 4,
                               ),
-                              child: MarkdownBody(data: m.content),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      CircleAvatar(
+                                        radius: 7,
+                                        backgroundImage: _modelLogo(m.modelId),
+                                        backgroundColor: Theme.of(context)
+                                            .colorScheme
+                                            .surfaceVariant
+                                            .withOpacity(0.5),
+                                        child:
+                                            _modelLogo(m.modelId) == null
+                                                ? const Icon(
+                                                  Icons.smart_toy_outlined,
+                                                  size: 10,
+                                                )
+                                                : null,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        (m.modelName ??
+                                            m.modelId ??
+                                            'Assistant'),
+                                        style: Theme.of(
+                                          context,
+                                        ).textTheme.labelSmall?.copyWith(
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .onSurface
+                                              .withOpacity(0.7),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  if (_reasoningByIndex[idx]?.text
+                                      case final r?) ...[
+                                    const SizedBox(height: 6),
+                                    ReasoningCollapsible(
+                                      reasoning: r,
+                                      done:
+                                          _reasoningByIndex[idx]?.done ?? false,
+                                      durationSeconds:
+                                          _reasoningByIndex[idx]
+                                              ?.durationSeconds,
+                                    ),
+                                  ],
+                                  const SizedBox(height: 6),
+                                  MarkdownBody(data: m.content),
+                                ],
+                              ),
                             ),
                           );
                         }
@@ -515,7 +825,154 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
 class _Message {
   final String role;
   final String content;
-  const _Message({required this.role, required this.content});
+  final String? modelId;
+  final String? modelName;
+  const _Message({
+    required this.role,
+    required this.content,
+    this.modelId,
+    this.modelName,
+  });
+}
+
+class _ReasoningMeta {
+  final String text;
+  final bool done;
+  final int? durationSeconds;
+  const _ReasoningMeta({
+    required this.text,
+    this.done = false,
+    this.durationSeconds,
+  });
+}
+
+class _ThinkingBubble extends StatefulWidget {
+  const _ThinkingBubble();
+  @override
+  State<_ThinkingBubble> createState() => _ThinkingBubbleState();
+}
+
+class _ThinkingBubbleState extends State<_ThinkingBubble>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1000),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        key: const Key('thinkingBubble'),
+        margin: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _Dot(controller: _controller, delay: 0.0),
+            const SizedBox(width: 6),
+            _Dot(controller: _controller, delay: 0.15),
+            const SizedBox(width: 6),
+            _Dot(controller: _controller, delay: 0.30),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _Dot extends StatelessWidget {
+  const _Dot({required this.controller, required this.delay});
+  final AnimationController controller;
+  final double delay;
+  @override
+  Widget build(BuildContext context) {
+    final curved = CurvedAnimation(
+      parent: controller,
+      curve: Interval(delay, math.min(1, delay + 0.7), curve: Curves.easeInOut),
+    );
+    return FadeTransition(
+      opacity: Tween(begin: 0.4, end: 1.0).animate(curved),
+      child: ScaleTransition(
+        scale: Tween(begin: 0.8, end: 1.0).animate(curved),
+        child: Container(
+          width: 6,
+          height: 6,
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+            shape: BoxShape.circle,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _WelcomePlaceholder extends ConsumerWidget {
+  const _WelcomePlaceholder();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return FutureBuilder<Map<String, dynamic>>(
+      future: ref
+          .read(openWebUIClientProvider.future)
+          .then((c) => c.getSessionUser()),
+      builder: (context, snap) {
+        final name = (snap.data?['name'] as String?)?.trim();
+        final displayName = (name == null || name.isEmpty) ? 'there' : name;
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 72,
+                  height: 72,
+                  decoration: BoxDecoration(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.primary.withOpacity(0.12),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.chat_bubble_rounded,
+                    size: 36,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Welcome, $displayName',
+                  style: Theme.of(context).textTheme.titleLarge,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'What is it today?',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
 }
 
 class _PopupRow extends StatelessWidget {
@@ -531,8 +988,71 @@ class _PopupRow extends StatelessWidget {
   }
 }
 
+class _ModelSelectorPlaceholder extends StatelessWidget {
+  const _ModelSelectorPlaceholder();
+  @override
+  Widget build(BuildContext context) {
+    final base = Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.25);
+    final highlight = Theme.of(
+      context,
+    ).colorScheme.surfaceVariant.withOpacity(0.45);
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 220),
+      child: Shimmer.fromColors(
+        baseColor: base,
+        highlightColor: highlight,
+        child: Container(
+          key: const Key('modelSelectorPlaceholder'),
+          height: 28,
+          decoration: BoxDecoration(
+            color: base,
+            borderRadius: BorderRadius.circular(18),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          alignment: Alignment.center,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 16,
+                height: 16,
+                decoration: BoxDecoration(color: base, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                width: 100,
+                height: 12,
+                decoration: BoxDecoration(
+                  color: base,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PresenceDot extends StatelessWidget {
+  const _PresenceDot();
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 8,
+      height: 8,
+      decoration: const BoxDecoration(
+        color: Color(0xFF22C55E), // refined green
+        shape: BoxShape.circle,
+      ),
+    );
+  }
+}
+
 class _ModelSelector extends StatelessWidget {
   const _ModelSelector({
+    super.key,
     required this.models,
     required this.selectedId,
     required this.iconCache,
@@ -583,12 +1103,17 @@ class _ModelSelector extends StatelessWidget {
       100.0,
       math.min(screenWidth * 0.6, screenWidth - 160.0),
     );
-    return GestureDetector(
+    return InkWell(
+      borderRadius: BorderRadius.circular(20),
       onTap: () async {
         final selected = await showModalBottomSheet<String>(
           context: context,
           showDragHandle: true,
           backgroundColor: Theme.of(context).colorScheme.surface,
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          clipBehavior: Clip.antiAlias,
           builder:
               (ctx) => SafeArea(
                 child: ListView.separated(
@@ -630,7 +1155,7 @@ class _ModelSelector extends StatelessWidget {
         constraints: BoxConstraints(maxWidth: maxWidth),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: const BoxDecoration(),
+          decoration: BoxDecoration(borderRadius: BorderRadius.circular(18)),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [

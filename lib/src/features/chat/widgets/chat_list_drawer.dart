@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../chat/screens/chat_room_screen.dart';
 import '../data/chat_repository.dart';
+import 'shimmers.dart';
 
 class ChatListDrawer extends ConsumerWidget {
   const ChatListDrawer({super.key});
@@ -19,11 +20,18 @@ class ChatListDrawer extends ConsumerWidget {
               final asyncChats = ref.watch(chatsProvider);
               return asyncChats.when(
                 loading:
-                    () => Column(
-                      children: const [
-                        LinearProgressIndicator(minHeight: 2),
-                        Expanded(child: SizedBox.shrink()),
-                      ],
+                    () => ListView.separated(
+                      itemCount: 10,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder:
+                          (context, i) => Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 2),
+                            child: ListTile(
+                              dense: true,
+                              visualDensity: const VisualDensity(vertical: -2),
+                              title: const ShimmerLine(height: 14),
+                            ),
+                          ),
                     ),
                 error: (e, st) => Center(child: Text('Error: $e')),
                 data: (chats) {
@@ -38,17 +46,7 @@ class ChatListDrawer extends ConsumerWidget {
                             child: ListTile(
                               dense: true,
                               visualDensity: const VisualDensity(vertical: -2),
-                              title: Container(
-                                height: 14,
-                                width: double.infinity,
-                                decoration: BoxDecoration(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .surfaceVariant
-                                      .withOpacity(0.35),
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                              ),
+                              title: const ShimmerLine(height: 14),
                             ),
                           ),
                     );
@@ -129,12 +127,17 @@ class ChatListDrawer extends ConsumerWidget {
                                         Theme.of(context).colorScheme.onSurface,
                                   ),
                                 ),
-                                onTap:
-                                    () => context.go(
-                                      '${ChatRoomScreen.routePath}?chatId=${chat['id']}',
-                                    ),
+                                onTap: () {
+                                  Navigator.of(context).maybePop();
+                                  context.go(
+                                    '${ChatRoomScreen.routePath}?chatId=${chat['id']}',
+                                  );
+                                },
                                 trailing: PopupMenuButton<String>(
                                   icon: const Icon(Icons.more_vert),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
                                   onSelected: (value) async {
                                     final repo = await ref.read(
                                       chatRepositoryProvider.future,

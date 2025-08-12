@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../core/settings/app_settings.dart';
 
-class ChatInputBar extends StatelessWidget {
+class ChatInputBar extends ConsumerWidget {
   const ChatInputBar({
     super.key,
     required this.controller,
@@ -13,7 +15,7 @@ class ChatInputBar extends StatelessWidget {
   final bool isSending;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
@@ -21,6 +23,11 @@ class ChatInputBar extends StatelessWidget {
         controller: controller,
         minLines: 1,
         maxLines: 6,
+        textInputAction: TextInputAction.newline,
+        onSubmitted: (_) async {
+          final settings = await ref.read(appSettingsProviderWithPrefs.future);
+          if (settings.state.enterToSend && !isSending) onSend();
+        },
         decoration: InputDecoration(
           hintText: 'Message',
           filled: true,
@@ -40,7 +47,8 @@ class ChatInputBar extends StatelessWidget {
           ),
           suffixIcon: Padding(
             padding: const EdgeInsets.only(right: 6),
-            child: IconButton(
+            child: IconButton.filled(
+              key: const Key('sendButton'),
               onPressed: isSending ? null : onSend,
               style: IconButton.styleFrom(
                 backgroundColor: scheme.primary,
@@ -63,7 +71,6 @@ class ChatInputBar extends StatelessWidget {
           ),
           suffixIconConstraints: const BoxConstraints(minWidth: 0),
         ),
-        onSubmitted: (_) => onSend(),
       ),
     );
   }

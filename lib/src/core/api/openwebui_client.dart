@@ -112,6 +112,25 @@ class OpenWebUIClient {
     throw ApiException('Invalid server response', statusCode: res.statusCode);
   }
 
+  Future<Map<String, dynamic>> getServerConfig() async {
+    final url = baseUrl;
+    if (url == null) throw const ApiException('Base URL not set');
+    final uri = Uri.parse('$url/api/config');
+    _log('getServerConfig GET $uri');
+    final res = await http.get(uri);
+    _log(
+      'getServerConfig <- ${res.statusCode} content-type=${res.headers['content-type']}',
+    );
+    final body = res.body.isNotEmpty ? jsonDecode(res.body) : {};
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      return body as Map<String, dynamic>;
+    }
+    throw ApiException(
+      'Failed to load server config',
+      statusCode: res.statusCode,
+    );
+  }
+
   Future<Map<String, dynamic>> signIn({
     required String email,
     required String password,
@@ -388,7 +407,14 @@ class OpenWebUIClient {
       Uri.parse('$url/api/chat/completions'),
     );
     request.headers.addAll(await _authHeaders());
-    request.body = jsonEncode(payload);
+    // Include session_id to align with WebUI socket usage when available
+    final withSession = Map<String, dynamic>.from(payload);
+    try {
+      final sess = await getSessionUser();
+      final socketId = sess['socket_id'] as String?; // may not exist
+      if (socketId != null) withSession['session_id'] = socketId;
+    } catch (_) {}
+    request.body = jsonEncode(withSession);
     _log(
       'streamChatCompletion POST ${request.url} headersAuth=${request.headers.containsKey('Authorization')}',
     );
@@ -461,6 +487,26 @@ class OpenWebUIClient {
     if (res.statusCode >= 200 && res.statusCode < 300) return data;
     throw ApiException(
       'tasks/auto/completions failed',
+      statusCode: res.statusCode,
+    );
+  }
+
+  Future<int> getActiveUsersCount() async {
+    final url = baseUrl;
+    if (url == null) throw const ApiException('Base URL not set');
+    final uri = Uri.parse('$url/api/v1/users/active');
+    _log('getActiveUsersCount GET $uri');
+    final res = await http.get(uri, headers: await _authHeaders());
+    if (res.headers['content-type']?.contains('text/html') == true) {
+      throw const ApiException('Server returned HTML for users/active');
+    }
+    final body = res.body.isNotEmpty ? jsonDecode(res.body) : {};
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      final ids = (body['user_ids'] as List? ?? const []);
+      return ids.length;
+    }
+    throw ApiException(
+      'Failed to load active users',
       statusCode: res.statusCode,
     );
   }

@@ -68,7 +68,10 @@ class _BaseUrlScreenState extends ConsumerState<BaseUrlScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Connect to OpenWebUI')),
+      appBar: AppBar(
+        title: const Text('Connect to OpenWebUI'),
+        automaticallyImplyLeading: true,
+      ),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 480),

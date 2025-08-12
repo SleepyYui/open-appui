@@ -1,6 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+// Runtime theme configuration
+Color _seedColor = const Color(0xFF0E7C62);
+bool _useDynamicAccent = false;
+ColorScheme? _dynamicLight;
+ColorScheme? _dynamicDark;
+
 class AppThemeModel {
   final ThemeData light;
   final ThemeData dark;
@@ -34,6 +40,28 @@ class AppThemeController extends StateNotifier<AppThemeModel> {
   void setMode(ThemeMode mode) {
     state = state.copyWith(mode: mode);
   }
+
+  void setSeed(Color seed) {
+    _seedColor = seed;
+    _useDynamicAccent = false;
+    state = state.copyWith(light: _buildLightTheme(), dark: _buildDarkTheme());
+  }
+
+  void useDynamicAccent(bool enable) {
+    _useDynamicAccent = enable;
+    state = state.copyWith(light: _buildLightTheme(), dark: _buildDarkTheme());
+  }
+
+  void setDynamicSchemes({ColorScheme? light, ColorScheme? dark}) {
+    _dynamicLight = light;
+    _dynamicDark = dark;
+    if (_useDynamicAccent) {
+      state = state.copyWith(
+        light: _buildLightTheme(),
+        dark: _buildDarkTheme(),
+      );
+    }
+  }
 }
 
 final appThemeProvider =
@@ -42,12 +70,36 @@ final appThemeProvider =
     });
 
 ThemeData _buildLightTheme() {
-  final base = ThemeData(useMaterial3: true);
+  final scheme =
+      _useDynamicAccent && _dynamicLight != null
+          ? _dynamicLight!
+          : ColorScheme.fromSeed(
+            seedColor: _seedColor,
+            brightness: Brightness.light,
+          );
+  final base = ThemeData(useMaterial3: true, colorScheme: scheme);
+
   return base.copyWith(
-    colorScheme: ColorScheme.fromSeed(
-      seedColor: const Color(0xFF6750A4),
-      brightness: Brightness.light,
+    colorScheme: scheme,
+    pageTransitionsTheme: const PageTransitionsTheme(
+      builders: {
+        TargetPlatform.android: ZoomPageTransitionsBuilder(),
+        TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+        TargetPlatform.linux: ZoomPageTransitionsBuilder(),
+        TargetPlatform.macOS: ZoomPageTransitionsBuilder(),
+        TargetPlatform.windows: ZoomPageTransitionsBuilder(),
+      },
     ),
+    splashFactory: InkSparkle.splashFactory,
+    splashColor: Colors.transparent,
+    highlightColor: Colors.transparent,
+    appBarTheme: AppBarTheme(
+      surfaceTintColor: Colors.transparent,
+      backgroundColor: scheme.surface,
+      foregroundColor: scheme.onSurface,
+      elevation: 0,
+    ),
+    progressIndicatorTheme: ProgressIndicatorThemeData(color: scheme.primary),
     inputDecorationTheme: InputDecorationTheme(
       filled: false,
       border: const OutlineInputBorder(
@@ -55,14 +107,11 @@ ThemeData _buildLightTheme() {
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: const BorderRadius.all(Radius.circular(14)),
-        borderSide: BorderSide(
-          color: base.colorScheme.outlineVariant,
-          width: 1.2,
-        ),
+        borderSide: BorderSide(color: scheme.outlineVariant, width: 1.2),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: const BorderRadius.all(Radius.circular(14)),
-        borderSide: BorderSide(color: base.colorScheme.primary, width: 1.5),
+        borderSide: BorderSide(color: scheme.primary, width: 1.5),
       ),
     ),
     elevatedButtonTheme: ElevatedButtonThemeData(
@@ -87,22 +136,40 @@ ThemeData _buildLightTheme() {
 }
 
 ThemeData _buildDarkTheme() {
-  final base = ThemeData(useMaterial3: true, brightness: Brightness.dark);
+  final scheme =
+      _useDynamicAccent && _dynamicDark != null
+          ? _dynamicDark!
+          : ColorScheme.fromSeed(
+            seedColor: _seedColor,
+            brightness: Brightness.dark,
+          );
+  final base = ThemeData(useMaterial3: true, colorScheme: scheme);
+
   const black = Color(0xFF000000);
   const surface = Color(0xFF0A0A0A);
-  final scheme = const ColorScheme.dark().copyWith(
-    primary: const Color(0xFFB69DF8),
-    secondary: const Color(0xFF8A80FF),
-    background: black,
-    surface: surface,
-    onBackground: Colors.white,
-    onSurface: Colors.white,
-  );
 
   return base.copyWith(
-    colorScheme: scheme,
+    colorScheme: scheme.copyWith(background: black, surface: surface),
     scaffoldBackgroundColor: black,
     dialogBackgroundColor: surface,
+    pageTransitionsTheme: const PageTransitionsTheme(
+      builders: {
+        TargetPlatform.android: ZoomPageTransitionsBuilder(),
+        TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+        TargetPlatform.linux: ZoomPageTransitionsBuilder(),
+        TargetPlatform.macOS: ZoomPageTransitionsBuilder(),
+        TargetPlatform.windows: ZoomPageTransitionsBuilder(),
+      },
+    ),
+    splashFactory: InkSparkle.splashFactory,
+    splashColor: Colors.transparent,
+    highlightColor: Colors.transparent,
+    appBarTheme: AppBarTheme(
+      surfaceTintColor: Colors.transparent,
+      backgroundColor: surface,
+      foregroundColor: scheme.onSurface,
+      elevation: 0,
+    ),
     inputDecorationTheme: InputDecorationTheme(
       filled: false,
       border: const OutlineInputBorder(
