@@ -27,27 +27,32 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
   Future<void> _bootstrap() async {
     final client = await ref.read(openWebUIClientProvider.future);
     final base = client.baseUrl;
+    // Debug trace for routing decisions (no secrets printed)
+    // ignore: avoid_print
+    print('[Splash] baseUrl=$base');
     if (base == null || base.isEmpty) {
       if (mounted) context.go(BaseUrlScreen.routePath);
       return;
     }
 
     final token = await client.token;
+    // ignore: avoid_print
+    print('[Splash] tokenPresent=${token != null && token.isNotEmpty}');
     if (token == null || token.isEmpty) {
-      // Attempt silent reauth like the web client
-      final ok = await client.trySilentReauth();
-      if (ok) {
-        if (mounted) context.go(ChatRoomScreen.routePath);
-      } else {
-        if (mounted) context.go(LoginScreen.routePath);
-      }
+      if (mounted) context.go(LoginScreen.routePath);
       return;
     }
 
     try {
+      // ignore: avoid_print
+      print('[Splash] validating session via /auths');
       await client.getSessionUser();
+      // ignore: avoid_print
+      print('[Splash] session valid');
       if (mounted) context.go(ChatRoomScreen.routePath);
-    } catch (_) {
+    } catch (e) {
+      // ignore: avoid_print
+      print('[Splash] session invalid: $e');
       if (mounted) context.go(LoginScreen.routePath);
     }
   }

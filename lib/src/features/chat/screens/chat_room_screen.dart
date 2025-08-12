@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -30,6 +31,9 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   final _input = TextEditingController();
   String? _chatId;
   final ScrollController _scroll = ScrollController();
+  // Cache model icons to prevent re-decoding/reloading on every rebuild/stream chunk
+  final Map<String, ImageProvider?> _modelIconCache = {};
+  String? _assistantPendingId;
 
   @override
   void initState() {
@@ -77,9 +81,11 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     setState(() => _sending = true);
     final client = await ref.read(openWebUIClientProvider.future);
 
-    // Ensure chat exists and mirror WebUI first-message flow
+    // Ensure chat exists and mirror WebUI first-message flow.
+    // IMPORTANT: Reuse the same chat id across subsequent sends; do not recreate.
     if (_chatId == null) {
       final userMsgId = const Uuid().v4();
+      final assistantMsgId = const Uuid().v4();
       final now = DateTime.now();
       final modelId = _selectedModelId!;
       final payloadChat = {
@@ -118,6 +124,74 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
 
       final created = await client.createChat(chat: payloadChat);
       _chatId = created['id'] as String?;
+      // safety: if web returns nested chat.chat.id as authoritative
+      _chatId ??= (created['chat']?['id'] as String?);
+
+      // Mirror WebUI: pre-create assistant stub and link to user message, so that
+      // the completions stream can reference the assistant id.
+      try {
+        final modelObj = _models.firstWhere(
+          (m) => m['id'] == modelId,
+          orElse: () => const {},
+        );
+        final modelName = (modelObj['name'] as String?) ?? modelId;
+        final updatePayload = {
+          'models': [modelId],
+          'history': {
+            'currentId': assistantMsgId,
+            'messages': {
+              userMsgId: {
+                'id': userMsgId,
+                'parentId': null,
+                'childrenIds': [assistantMsgId],
+                'role': 'user',
+                'content': text,
+                'timestamp': (now.millisecondsSinceEpoch / 1000).floor(),
+                'models': [modelId],
+              },
+              assistantMsgId: {
+                'parentId': userMsgId,
+                'id': assistantMsgId,
+                'childrenIds': [],
+                'role': 'assistant',
+                'content': '',
+                'model': modelId,
+                'modelName': modelName,
+                'modelIdx': 0,
+                'timestamp': (now.millisecondsSinceEpoch / 1000).floor(),
+              },
+            },
+          },
+          'messages': [
+            {
+              'id': userMsgId,
+              'parentId': null,
+              'childrenIds': [assistantMsgId],
+              'role': 'user',
+              'content': text,
+              'timestamp': (now.millisecondsSinceEpoch / 1000).floor(),
+              'models': [modelId],
+            },
+            {
+              'parentId': userMsgId,
+              'id': assistantMsgId,
+              'childrenIds': [],
+              'role': 'assistant',
+              'content': '',
+              'model': modelId,
+              'modelName': modelName,
+              'modelIdx': 0,
+              'timestamp': (now.millisecondsSinceEpoch / 1000).floor(),
+            },
+          ],
+          'params': {},
+          'files': [],
+        };
+        if (_chatId != null) {
+          await client.updateChat(id: _chatId!, chat: updatePayload);
+          _assistantPendingId = assistantMsgId;
+        }
+      } catch (_) {}
     }
 
     // Append user message locally
@@ -135,6 +209,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
         ],
         'chat_id': _chatId,
         'stream': true,
+        if (_assistantPendingId != null) 'id': _assistantPendingId,
       };
 
       final streamed = await client.streamChatCompletion(payload: payload);
@@ -189,12 +264,21 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
       }
       // After stream completes, call chat/completed & update chat with final messages
       try {
+        final nowTs = (DateTime.now().millisecondsSinceEpoch / 1000).floor();
+        final msgs = <Map<String, dynamic>>[];
+        for (final m in _messages) {
+          msgs.add({
+            'id': const Uuid().v4(),
+            'role': m.role,
+            'content': m.content,
+            'timestamp': nowTs,
+          });
+        }
         await client.postChatCompleted({
           'model': _selectedModelId,
-          'messages':
-              _messages
-                  .map((m) => {'role': m.role, 'content': m.content})
-                  .toList(),
+          'messages': msgs,
+          'model_item':
+              _selectedModelId == null ? null : {'id': _selectedModelId},
           'chat_id': _chatId,
           'id': const Uuid().v4(),
         });
@@ -222,6 +306,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
         title: _ModelSelector(
           models: _models,
           selectedId: _selectedModelId,
+          iconCache: _modelIconCache,
           onChanged: (id) => setState(() => _selectedModelId = id),
         ),
         centerTitle: true,
@@ -251,46 +336,168 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
               });
             },
           ),
+          const SizedBox(width: 4),
+          FutureBuilder<Map<String, dynamic>>(
+            future: ref
+                .read(openWebUIClientProvider.future)
+                .then((c) => c.getSessionUser()),
+            builder: (context, snapshot) {
+              final url = snapshot.data?['profile_image_url'] as String?;
+              final imageProvider =
+                  (url != null && url.isNotEmpty) ? NetworkImage(url) : null;
+              return PopupMenuButton<String>(
+                tooltip: 'Account',
+                offset: const Offset(0, 40),
+                itemBuilder:
+                    (ctx) => [
+                      const PopupMenuItem(
+                        value: 'settings',
+                        child: _PopupRow(
+                          icon: Icons.settings,
+                          label: 'Settings',
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'archived',
+                        child: _PopupRow(
+                          icon: Icons.inventory_2_outlined,
+                          label: 'Archived Chats',
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'playground',
+                        child: _PopupRow(
+                          icon: Icons.smart_toy_outlined,
+                          label: 'Playground',
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'admin',
+                        child: _PopupRow(
+                          icon: Icons.admin_panel_settings_outlined,
+                          label: 'Admin Panel',
+                        ),
+                      ),
+                      const PopupMenuDivider(),
+                      const PopupMenuItem(
+                        value: 'signout',
+                        child: _PopupRow(icon: Icons.logout, label: 'Sign Out'),
+                      ),
+                      const PopupMenuDivider(),
+                      PopupMenuItem(
+                        enabled: false,
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.circle,
+                              color: Colors.green,
+                              size: 10,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Active Users: 1',
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                onSelected: (v) async {
+                  if (v == 'signout') {
+                    final client = await ref.read(
+                      openWebUIClientProvider.future,
+                    );
+                    await client.signOut();
+                    if (context.mounted)
+                      Navigator.of(context).popUntil((_) => true);
+                  }
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: CircleAvatar(
+                    radius: 14,
+                    backgroundImage: imageProvider,
+                    child:
+                        imageProvider == null
+                            ? const Icon(Icons.person_outline, size: 18)
+                            : null,
+                  ),
+                ),
+              );
+            },
+          ),
         ],
       ),
       drawer: const ChatListDrawer(),
       body: Column(
         children: [
           Expanded(
-            child: ListView.builder(
-              controller: _scroll,
-              padding: const EdgeInsets.all(12),
-              itemCount: _messages.length,
-              itemBuilder: (context, idx) {
-                final m = _messages[idx];
-                final isUser = m.role == 'user';
-                if (isUser) {
-                  return Align(
-                    alignment: Alignment.centerRight,
-                    child: Container(
-                      margin: const EdgeInsets.symmetric(vertical: 4),
+            child:
+                _messages.isEmpty
+                    ? ListView.builder(
                       padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.primaryContainer,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(m.content),
+                      itemCount: 6,
+                      itemBuilder:
+                          (context, i) => Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            child: Align(
+                              alignment:
+                                  i.isEven
+                                      ? Alignment.centerLeft
+                                      : Alignment.centerRight,
+                              child: Container(
+                                height: 16,
+                                width:
+                                    MediaQuery.of(context).size.width *
+                                    (0.4 + (i % 3) * 0.15),
+                                decoration: BoxDecoration(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .surfaceVariant
+                                      .withOpacity(0.35),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                            ),
+                          ),
+                    )
+                    : ListView.builder(
+                      controller: _scroll,
+                      padding: const EdgeInsets.all(12),
+                      itemCount: _messages.length,
+                      itemBuilder: (context, idx) {
+                        final m = _messages[idx];
+                        final isUser = m.role == 'user';
+                        if (isUser) {
+                          return Align(
+                            alignment: Alignment.centerRight,
+                            child: Container(
+                              margin: const EdgeInsets.symmetric(vertical: 4),
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color:
+                                    Theme.of(
+                                      context,
+                                    ).colorScheme.primaryContainer,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(m.content),
+                            ),
+                          );
+                        } else {
+                          return Align(
+                            alignment: Alignment.centerLeft,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                vertical: 8,
+                                horizontal: 4,
+                              ),
+                              child: MarkdownBody(data: m.content),
+                            ),
+                          );
+                        }
+                      },
                     ),
-                  );
-                } else {
-                  return Align(
-                    alignment: Alignment.centerLeft,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        vertical: 8,
-                        horizontal: 4,
-                      ),
-                      child: MarkdownBody(data: m.content),
-                    ),
-                  );
-                }
-              },
-            ),
           ),
           SafeArea(
             child: ChatInputBar(
@@ -311,33 +518,52 @@ class _Message {
   const _Message({required this.role, required this.content});
 }
 
+class _PopupRow extends StatelessWidget {
+  const _PopupRow({required this.icon, required this.label});
+  final IconData icon;
+  final String label;
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [Icon(icon, size: 18), const SizedBox(width: 12), Text(label)],
+    );
+  }
+}
+
 class _ModelSelector extends StatelessWidget {
   const _ModelSelector({
     required this.models,
     required this.selectedId,
+    required this.iconCache,
     required this.onChanged,
   });
 
   final List<Map<String, dynamic>> models;
   final String? selectedId;
+  final Map<String, ImageProvider?> iconCache;
   final ValueChanged<String> onChanged;
 
-  ImageProvider? _iconFromUrl(String url) {
-    if (url.startsWith('http')) return NetworkImage(url);
-    if (url.startsWith('data:image')) {
+  ImageProvider? _iconFromUrlCached(String id, String url) {
+    if (iconCache.containsKey(id)) return iconCache[id];
+    ImageProvider? image;
+    if (url.startsWith('http')) {
+      image = NetworkImage(url);
+    } else if (url.startsWith('data:image')) {
       try {
         final base64Str = url.substring(url.indexOf(',') + 1);
-        return MemoryImage(base64Decode(base64Str));
+        image = MemoryImage(base64Decode(base64Str));
       } catch (_) {
-        return null;
+        image = null;
       }
     }
-    return null;
+    iconCache[id] = image;
+    return image;
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    // final theme = Theme.of(context);
     final selected = models.firstWhere(
       (m) => m['id'] == selectedId,
       orElse: () => models.isNotEmpty ? models.first : {},
@@ -346,9 +572,17 @@ class _ModelSelector extends StatelessWidget {
         (selected['name'] as String?) ?? (selected['id'] as String? ?? '');
     final iconUrl =
         (selected['info']?['meta']?['profile_image_url'] as String?) ?? '';
-    final img = iconUrl.isNotEmpty ? _iconFromUrl(iconUrl) : null;
+    final img =
+        iconUrl.isNotEmpty
+            ? _iconFromUrlCached(selected['id'] as String? ?? title, iconUrl)
+            : null;
 
-    final maxWidth = MediaQuery.of(context).size.width * 0.75;
+    final screenWidth = MediaQuery.of(context).size.width;
+    // Leave room for leading menu + two actions (new chat + avatar)
+    final maxWidth = math.max(
+      100.0,
+      math.min(screenWidth * 0.6, screenWidth - 160.0),
+    );
     return GestureDetector(
       onTap: () async {
         final selected = await showModalBottomSheet<String>(
@@ -369,7 +603,9 @@ class _ModelSelector extends StatelessWidget {
                         (m['info']?['meta']?['profile_image_url'] as String?) ??
                         '';
                     final mi =
-                        iconUrl.isNotEmpty ? _iconFromUrl(iconUrl) : null;
+                        iconUrl.isNotEmpty
+                            ? _iconFromUrlCached(id, iconUrl)
+                            : null;
                     final active = id == selectedId;
                     return ListTile(
                       leading:
@@ -394,13 +630,7 @@ class _ModelSelector extends StatelessWidget {
         constraints: BoxConstraints(maxWidth: maxWidth),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: ShapeDecoration(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-              side: BorderSide(color: theme.colorScheme.outlineVariant),
-            ),
-            color: Colors.transparent,
-          ),
+          decoration: const BoxDecoration(),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [

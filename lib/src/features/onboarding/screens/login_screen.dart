@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/api/openwebui_client.dart';
-import 'tutorial_screen.dart';
 import '../../chat/screens/chat_room_screen.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -20,7 +19,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _email = TextEditingController();
   final _password = TextEditingController();
-  bool _remember = true;
   bool _loading = false;
   String? _error;
 
@@ -39,15 +37,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     });
     try {
       final client = await ref.read(openWebUIClientProvider.future);
+      // ignore: avoid_print
+      print('[Login] submit email=${_email.text.trim()}');
       await client.signIn(email: _email.text.trim(), password: _password.text);
-      await client.saveCredentials(
-        email: _email.text.trim(),
-        password: _password.text,
-        remember: _remember,
-      );
+      // ignore: avoid_print
+      print('[Login] saved credentials, navigating to chat');
       if (!mounted) return;
       context.go(ChatRoomScreen.routePath);
     } catch (e) {
+      // ignore: avoid_print
+      print('[Login] error: $e');
       setState(() => _error = e.toString());
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -99,29 +98,21 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           ),
                         ),
                       const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Checkbox(
-                            value: _remember,
-                            onChanged:
-                                (v) => setState(() => _remember = v ?? true),
-                          ),
-                          const Text('Remember me'),
-                          const Spacer(),
-                          OutlinedButton(
-                            onPressed: _loading ? null : _submit,
-                            child:
-                                _loading
-                                    ? const SizedBox(
-                                      height: 16,
-                                      width: 16,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                    : const Text('Sign in'),
-                          ),
-                        ],
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: OutlinedButton(
+                          onPressed: _loading ? null : _submit,
+                          child:
+                              _loading
+                                  ? const SizedBox(
+                                    height: 16,
+                                    width: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                  : const Text('Sign in'),
+                        ),
                       ),
                     ],
                   ),

@@ -8,9 +8,9 @@ class ChatRepository {
   final OpenWebUIClient _client;
   final CacheService _cache;
 
-  Future<List<Map<String, dynamic>>> listChats() async {
+  Future<List<Map<String, dynamic>>> listChats({int? page}) async {
     try {
-      final fresh = await _client.listChats();
+      final fresh = await _client.listChats(page: page);
       await _cache.setJson('chats', fresh);
       return fresh;
     } catch (_) {
@@ -24,6 +24,13 @@ class ChatRepository {
   Future<Map<String, dynamic>> getChat(String id) => _client.getChatById(id);
   Future<Map<String, dynamic>> createChat(Map<String, dynamic> chat) =>
       _client.createChat(chat: chat);
+
+  Future<Map<String, dynamic>> pinChat(String id) => _client.pinChat(id);
+  Future<Map<String, dynamic>> archiveChat(String id) =>
+      _client.archiveChat(id);
+  Future<Map<String, dynamic>> cloneChat(String id) => _client.cloneChat(id);
+  Future<Map<String, dynamic>> shareChat(String id) => _client.shareChat(id);
+  Future<bool> deleteChat(String id) => _client.deleteChat(id);
 }
 
 final chatRepositoryProvider = FutureProvider<ChatRepository>((ref) async {
@@ -37,5 +44,5 @@ final chatsProvider = FutureProvider.autoDispose<List<Map<String, dynamic>>>((
   ref,
 ) async {
   final repo = await ref.watch(chatRepositoryProvider.future);
-  return repo.listChats();
+  return repo.listChats(page: 1);
 });
