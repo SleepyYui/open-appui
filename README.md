@@ -6,11 +6,8 @@ OpenAppUI is a cross‑platform Flutter client for interacting with an Open WebU
 - **Tech**: Flutter, Riverpod, GoRouter, Material Design 3
 - **Backend**: Any reachable Open WebUI server (self‑hosted or remote)
 
-> Note: The `dev-submodules/` directory (in case you clone with submodules) (including `dev-submodules/open-webui`) is for development convenience only. It is not part of the application and is not required to build or run OpenAppUI.
-
-## Affiliation
-
-OpenAppUI is an independent project and is not affiliated with, endorsed by, or sponsored by the Open WebUI project or its maintainers. The projects are separate and unrelated entities. References to Open WebUI in this repository are solely for interoperability and descriptive purposes.
+> [!NOTE]
+> The `dev-submodules/` directory (in case you clone with submodules) (including `dev-submodules/open-webui`) is for development convenience only. It is not part of the application and is not required to build or run OpenAppUI.
 
 ## Prerequisites
 
@@ -67,3 +64,6 @@ Please do not file public issues for security matters. See `SECURITY.md` for pri
 
 - [Open WebUI](https://github.com/open-webui/open-webui)
 - Flutter and the Flutter community
+
+> [!IMPORTANT] 
+> OpenAppUI is an independent project and is not affiliated with, endorsed by, or sponsored by the Open WebUI project or its maintainers. The projects are separate and unrelated entities. References to Open WebUI in this repository are solely for interoperability and descriptive purposes.
