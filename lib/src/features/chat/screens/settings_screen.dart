@@ -8,6 +8,7 @@ import '../../onboarding/screens/login_screen.dart';
 import '../../../core/settings/app_settings.dart';
 import 'theme_settings_screen.dart';
 import 'webview_screen.dart';
+import '../../onboarding/screens/base_url_screen.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -143,52 +144,8 @@ class SettingsScreen extends ConsumerWidget {
                       title: const Text('Change WebUI URL'),
                       subtitle: const Text('Switch the Open WebUI server'),
                       trailing: const Icon(Icons.chevron_right),
-                      onTap: () async {
-                        final base = await ref
-                            .read(openWebUIClientProvider.future)
-                            .then((c) => c.baseUrl ?? '');
-                        final ctrl = TextEditingController(text: base);
-                        final saved = await showDialog<String?>(
-                          context: context,
-                          builder:
-                              (ctx) => AlertDialog(
-                                title: const Text('Open WebUI URL'),
-                                content: TextField(
-                                  controller: ctrl,
-                                  decoration: const InputDecoration(
-                                    labelText:
-                                        'Base URL (e.g. https://host:port)',
-                                  ),
-                                  keyboardType: TextInputType.url,
-                                  autofocus: true,
-                                ),
-                                actions: [
-                                  TextButton(
-                                    onPressed: () => Navigator.of(ctx).pop(),
-                                    child: const Text('Cancel'),
-                                  ),
-                                  FilledButton(
-                                    onPressed:
-                                        () => Navigator.of(
-                                          ctx,
-                                        ).pop(ctrl.text.trim()),
-                                    child: const Text('Save'),
-                                  ),
-                                ],
-                              ),
-                        );
-                        if (saved != null) {
-                          final client = await ref.read(
-                            openWebUIClientProvider.future,
-                          );
-                          await client.setBaseUrl(saved);
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Base URL updated')),
-                            );
-                          }
-                        }
-                      },
+                      onTap:
+                          () => context.push(BaseUrlScreen.settingsRoutePath),
                     ),
                     const Divider(height: 1),
                     SwitchListTile(

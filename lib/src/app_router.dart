@@ -74,6 +74,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                         const MaterialPage(child: AccountSettingsScreen()),
               ),
               GoRoute(
+                path: BaseUrlScreen.settingsRoutePath,
+                name: BaseUrlScreen.settingsRouteName,
+                pageBuilder:
+                    (context, state) =>
+                        const MaterialPage(child: BaseUrlScreen()),
+              ),
+              GoRoute(
                 path: ThemeSettingsScreen.routePath,
                 name: ThemeSettingsScreen.routeName,
                 pageBuilder:

@@ -11,6 +11,8 @@ class BaseUrlScreen extends ConsumerStatefulWidget {
 
   static const routePath = '/onboarding/base-url';
   static const routeName = 'base_url';
+  static const settingsRoutePath = '/app/settings/base-url';
+  static const settingsRouteName = 'settings_base_url';
 
   @override
   ConsumerState<BaseUrlScreen> createState() => _BaseUrlScreenState();
