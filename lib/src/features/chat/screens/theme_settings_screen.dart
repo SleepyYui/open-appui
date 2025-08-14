@@ -1,21 +1,55 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:palette_generator/palette_generator.dart';
 
 import '../../../core/settings/app_settings.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/theme/color_utils.dart';
 
-class ThemeSettingsScreen extends ConsumerWidget {
+class ThemeSettingsScreen extends ConsumerStatefulWidget {
   const ThemeSettingsScreen({super.key});
   static const routePath = '/app/settings/theme';
   static const routeName = 'settings_theme';
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ThemeSettingsScreen> createState() =>
+      _ThemeSettingsScreenState();
+}
+
+class _ThemeSettingsScreenState extends ConsumerState<ThemeSettingsScreen> {
+  Future<void Function()> _showBlockingProgress(String text) async {
+    if (!mounted) return () {};
+    // Show dialog (non-await) and return a dismiss function
+    // ignore: discarded_futures
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder:
+          (ctx) => AlertDialog(
+            content: Row(
+              children: [
+                const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(width: 12),
+                Flexible(child: Text(text)),
+              ],
+            ),
+          ),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    return () {
+      if (!mounted) return;
+      final nav = Navigator.of(context, rootNavigator: true);
+      if (nav.canPop()) nav.pop();
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final theme = ref.watch(appThemeProvider);
     final themeCtrl = ref.read(appThemeProvider.notifier);
     final settings = ref.watch(appSettingsProvider);
@@ -68,6 +102,29 @@ class ThemeSettingsScreen extends ConsumerWidget {
                   onChanged: (v) async {
                     themeCtrl.useDynamicAccent(v);
                     await settingsCtrl.setUseDynamic(v);
+                  },
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  title: const Text('Apply wallpaper colors now'),
+                  subtitle: const Text('Use current system dynamic colors'),
+                  trailing: const Icon(Icons.palette_outlined),
+                  onTap: () async {
+                    final dismiss = await _showBlockingProgress(
+                      'Applying wallpaper colors...',
+                    );
+                    await settingsCtrl.setUseDynamic(true);
+                    await settingsCtrl.setUseExactPrimaryColor(false);
+                    themeCtrl.useDynamicAccent(true);
+                    themeCtrl.setMode(theme.mode);
+                    dismiss();
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Wallpaper colors applied'),
+                        ),
+                      );
+                    }
                   },
                 ),
                 const Divider(height: 1),
@@ -158,22 +215,26 @@ class ThemeSettingsScreen extends ConsumerWidget {
                       source: ImageSource.gallery,
                     );
                     if (picked == null) return;
-                    final file = File(picked.path);
-                    final palette = await PaletteGenerator.fromImageProvider(
-                      FileImage(file),
+                    final dismiss = await _showBlockingProgress(
+                      'Generating theme from image...',
                     );
-                    final dominant = palette.dominantColor?.color;
+                    // Compute dominant color off main thread
+                    final argb = await computeDominantArgb(picked.path);
+                    final dominant = argb != null ? Color(argb) : null;
                     if (dominant != null) {
                       themeCtrl.setSeed(dominant);
                       await settingsCtrl.setSeedColor(dominant);
                       await settingsCtrl.setUseDynamic(false);
-                      if (context.mounted) {
+                      dismiss();
+                      if (mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
                             content: Text('Theme updated from image'),
                           ),
                         );
                       }
+                    } else {
+                      dismiss();
                     }
                   },
                 ),
