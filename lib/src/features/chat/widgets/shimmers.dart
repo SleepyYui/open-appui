@@ -13,10 +13,12 @@ class ShimmerLine extends StatelessWidget {
   final double radius;
   @override
   Widget build(BuildContext context) {
-    final base = Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.25);
+    final base = Theme.of(
+      context,
+    ).colorScheme.surfaceContainerHighest.withOpacity(0.25);
     final highlight = Theme.of(
       context,
-    ).colorScheme.surfaceVariant.withOpacity(0.45);
+    ).colorScheme.surfaceContainerHighest.withOpacity(0.45);
     return Shimmer.fromColors(
       baseColor: base,
       highlightColor: highlight,

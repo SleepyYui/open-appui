@@ -66,7 +66,7 @@ class _ReasoningCollapsibleState extends State<ReasoningCollapsible> {
                     padding: const EdgeInsets.only(top: 6, bottom: 6),
                     child: DecoratedBox(
                       decoration: BoxDecoration(
-                        color: scheme.surfaceVariant.withOpacity(0.15),
+                        color: scheme.surfaceContainerHighest.withOpacity(0.15),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Padding(

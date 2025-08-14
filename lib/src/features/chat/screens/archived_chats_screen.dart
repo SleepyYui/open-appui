@@ -72,8 +72,9 @@ class ArchivedChatsScreen extends ConsumerWidget {
                     );
                     if (value == 'unarchive') {
                       await client.archiveChat(chat['id'] as String);
-                      if (context.mounted)
+                      if (context.mounted) {
                         context.go(ArchivedChatsScreen.routePath);
+                      }
                     } else if (value == 'delete') {
                       final ok = await showDialog<bool>(
                         context: context,
@@ -95,8 +96,9 @@ class ArchivedChatsScreen extends ConsumerWidget {
                       );
                       if (ok == true) {
                         await client.deleteChat(chat['id'] as String);
-                        if (context.mounted)
+                        if (context.mounted) {
                           context.go(ArchivedChatsScreen.routePath);
+                        }
                       }
                     }
                   },

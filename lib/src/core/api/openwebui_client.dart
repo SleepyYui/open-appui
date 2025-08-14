@@ -25,6 +25,7 @@ class OpenWebUIClient {
 
   final SharedPreferences _prefs;
   final FlutterSecureStorage _secure;
+  Map<String, dynamic>? _cachedSessionUser;
 
   String? get baseUrl => _prefs.getString(_kBaseUrlKey);
   Future<String?> get token async => await _secure.read(key: _kTokenKey);
@@ -47,7 +48,7 @@ class OpenWebUIClient {
     if (t == null || t.isEmpty) return 'null';
     final start = t.substring(0, t.length < 6 ? t.length : 6);
     final end = t.length > 4 ? t.substring(t.length - 4) : '';
-    return 'len=${t.length}, ${start}...$end';
+    return 'len=${t.length}, $start...$end';
   }
 
   Future<void> setBaseUrl(String url) async {
@@ -179,17 +180,17 @@ class OpenWebUIClient {
   }
 
   Future<Map<String, dynamic>> getSessionUser() async {
+    if (_cachedSessionUser != null) {
+      _log('getSessionUser cache hit');
+      return _cachedSessionUser!;
+    }
     final url = baseUrl;
     if (url == null) throw const ApiException('Base URL not set');
-    // Use trailing slash to match FastAPI route (@router.get("/")) and avoid HTML fallback
     final uri = Uri.parse('$url/api/v1/auths/');
     _log('getSessionUser GET $uri');
 
     final headers = await _authHeaders();
     final res = await http.get(uri, headers: headers);
-    _log(
-      'getSessionUser headers -> hasAuth=${headers.containsKey('Authorization')}',
-    );
     final contentType = res.headers['content-type'] ?? '';
     _log('getSessionUser <- ${res.statusCode} content-type=$contentType');
     if (contentType.contains('text/html')) {
@@ -200,7 +201,8 @@ class OpenWebUIClient {
     }
     final body = res.body.isNotEmpty ? jsonDecode(res.body) : {};
     if (res.statusCode >= 200 && res.statusCode < 300) {
-      return body as Map<String, dynamic>;
+      _cachedSessionUser = (body as Map).cast<String, dynamic>();
+      return _cachedSessionUser!;
     }
     throw ApiException(
       body is Map && body['detail'] is String ? body['detail'] : 'Unauthorized',
@@ -410,10 +412,12 @@ class OpenWebUIClient {
     // Include session_id to align with WebUI socket usage when available
     final withSession = Map<String, dynamic>.from(payload);
     try {
-      final sess = await getSessionUser();
-      final socketId = sess['socket_id'] as String?; // may not exist
-      if (socketId != null) withSession['session_id'] = socketId;
-    } catch (_) {}
+      final sess = _cachedSessionUser ?? await getSessionUser();
+      final socketId = (sess['socket_id'] as String?);
+      withSession['session_id'] = socketId ?? '';
+    } catch (_) {
+      withSession['session_id'] = '';
+    }
     request.body = jsonEncode(withSession);
     _log(
       'streamChatCompletion POST ${request.url} headersAuth=${request.headers.containsKey('Authorization')}',
@@ -489,6 +493,54 @@ class OpenWebUIClient {
       'tasks/auto/completions failed',
       statusCode: res.statusCode,
     );
+  }
+
+  Future<String?> generateTitle({
+    required String model,
+    required List<Map<String, dynamic>> messages,
+    String? chatId,
+  }) async {
+    final url = baseUrl;
+    if (url == null) throw const ApiException('Base URL not set');
+    final uri = Uri.parse('$url/api/v1/tasks/title/completions');
+    _log('generateTitle POST $uri');
+    final res = await http
+        .post(
+          uri,
+          headers: await _authHeaders(),
+          body: jsonEncode({
+            'model': model,
+            'messages': messages,
+            if (chatId != null) 'chat_id': chatId,
+          }),
+        )
+        .timeout(const Duration(seconds: 30));
+    if (res.headers['content-type']?.contains('text/html') == true) {
+      throw const ApiException(
+        'Server returned HTML for tasks/title/completions',
+      );
+    }
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      try {
+        final body = jsonDecode(res.body);
+        final content =
+            body['choices']?[0]?['message']?['content'] as String? ?? '';
+        if (content.isEmpty) return null;
+        final sanitized = content.replaceAll(RegExp("['‘’`]"), '"');
+        final start = sanitized.indexOf('{');
+        final end = sanitized.lastIndexOf('}');
+        if (start != -1 && end != -1) {
+          final jsonBlock = sanitized.substring(start, end + 1);
+          final parsed = jsonDecode(jsonBlock);
+          final title = parsed['title'] as String?;
+          return title?.trim();
+        }
+      } catch (e) {
+        _log('generateTitle parse error: $e');
+      }
+      return null;
+    }
+    throw ApiException('title/completions failed', statusCode: res.statusCode);
   }
 
   Future<int> getActiveUsersCount() async {
@@ -607,4 +659,9 @@ final openWebUIClientProvider = FutureProvider<OpenWebUIClient>((ref) async {
   final prefs = await SharedPreferences.getInstance();
   const secure = FlutterSecureStorage();
   return OpenWebUIClient(prefs, secure);
+});
+
+final sessionUserProvider = FutureProvider<Map<String, dynamic>>((ref) async {
+  final client = await ref.watch(openWebUIClientProvider.future);
+  return client.getSessionUser();
 });

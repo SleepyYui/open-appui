@@ -149,9 +149,8 @@ ThemeData _buildDarkTheme() {
   const surface = Color(0xFF0A0A0A);
 
   return base.copyWith(
-    colorScheme: scheme.copyWith(background: black, surface: surface),
+    colorScheme: scheme.copyWith(surface: surface),
     scaffoldBackgroundColor: black,
-    dialogBackgroundColor: surface,
     pageTransitionsTheme: const PageTransitionsTheme(
       builders: {
         TargetPlatform.android: ZoomPageTransitionsBuilder(),
@@ -199,5 +198,6 @@ ThemeData _buildDarkTheme() {
         side: BorderSide(color: scheme.outlineVariant, width: 1),
       ),
     ),
+    dialogTheme: DialogThemeData(backgroundColor: surface),
   );
 }

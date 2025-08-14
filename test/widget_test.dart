@@ -8,15 +8,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:open_appui/src/features/chat/screens/chat_room_screen.dart';
+import 'test_utils.dart';
 
 void main() {
   testWidgets('Model selector shows shimmer placeholder before load', (
     tester,
   ) async {
-    await tester.pumpWidget(
+    final app = await withFakeClient(
       const MaterialApp(home: Scaffold(body: ChatRoomScreen())),
     );
-    // Initial build shows placeholder until models load
+    await tester.pumpWidget(app);
     expect(find.byKey(const Key('modelSelectorPlaceholder')), findsOneWidget);
   });
 }

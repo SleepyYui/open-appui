@@ -31,7 +31,7 @@ class ChatInputBar extends ConsumerWidget {
         decoration: InputDecoration(
           hintText: 'Message',
           filled: true,
-          fillColor: scheme.surfaceVariant.withOpacity(0.2),
+          fillColor: scheme.surfaceContainerHighest.withOpacity(0.2),
           contentPadding: const EdgeInsets.symmetric(
             horizontal: 16,
             vertical: 14,

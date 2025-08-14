@@ -4,15 +4,12 @@ import 'package:open_appui/src/features/chat/screens/chat_room_screen.dart';
 import 'test_utils.dart';
 
 void main() {
-  testWidgets('Assistant message shows model badge when present', (
-    tester,
-  ) async {
+  testWidgets('Welcome placeholder shows greeting text', (tester) async {
     final app = await withFakeClient(
       const MaterialApp(home: Scaffold(body: ChatRoomScreen())),
     );
     await tester.pumpWidget(app);
-    // Initially we expect welcome placeholder (no model badge). This is a smoke test to ensure
-    // the widget tree builds; deeper integration requires mocking HTTP.
-    expect(find.textContaining('Welcome'), findsOneWidget);
+    // Initial empty state uses welcome placeholder headline
+    expect(find.textContaining('Welcome,'), findsOneWidget);
   });
 }

@@ -105,8 +105,9 @@ class _BaseUrlScreenState extends ConsumerState<BaseUrlScreen> {
                             return 'Base URL is required';
                           }
                           final ok = Uri.tryParse(v.trim())?.hasScheme ?? false;
-                          if (!ok)
+                          if (!ok) {
                             return 'Enter a valid URL incl. scheme (http/https)';
+                          }
                           return null;
                         },
                       ),

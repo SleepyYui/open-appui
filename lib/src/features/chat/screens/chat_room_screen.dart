@@ -13,6 +13,7 @@ import '../widgets/chat_list_drawer.dart';
 import '../widgets/chat_input_bar.dart';
 import '../widgets/reasoning_collapsible.dart';
 import '../widgets/shimmers.dart';
+import '../data/chat_repository.dart';
 import 'package:shimmer/shimmer.dart';
 
 class ChatRoomScreen extends ConsumerStatefulWidget {
@@ -40,7 +41,6 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   final Map<String, ImageProvider?> _modelIconCache = {};
   String? _assistantPendingId;
   String? _lastUserMsgId;
-  String? _lastAssistantMsgId;
   bool _assistantStarted = false;
 
   bool _isThinking = false;
@@ -73,6 +73,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   void initState() {
     super.initState();
     _chatId = widget.chatId;
+    _loadingChat = true;
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
   }
 
@@ -83,6 +84,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
       setState(() {
         _chatId = widget.chatId;
         _messages = [];
+        _loadingChat = true;
       });
       WidgetsBinding.instance.addPostFrameCallback((_) => _load());
     }
@@ -90,6 +92,8 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
 
   Future<void> _load() async {
     setState(() => _loadingChat = true);
+    // Prime session cache to avoid repeated /auth calls on initial build
+    unawaited(ref.read(sessionUserProvider.future));
     final client = await ref.read(openWebUIClientProvider.future);
     final models = await client.listModels();
     setState(() {
@@ -100,17 +104,38 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
 
     if (_chatId != null) {
       final chat = await client.getChatById(_chatId!);
-      final history =
+      final historyMap =
           (chat['chat']?['history']?['messages'] ?? {}) as Map<String, dynamic>;
-      final ordered =
-          history.values.map((e) => e as Map<String, dynamic>).toList()..sort(
-            (a, b) => ((a['createdAt'] ?? 0) as int).compareTo(
-              (b['createdAt'] ?? 0) as int,
-            ),
-          );
+      final currentId = chat['chat']?['history']?['currentId'] as String?;
+
+      List<Map<String, dynamic>> chain = [];
+      if (historyMap.isNotEmpty &&
+          currentId != null &&
+          historyMap[currentId] != null) {
+        // Reconstruct chain from root -> current by following parentId links backwards
+        String? cursor = currentId;
+        while (cursor != null && historyMap[cursor] != null) {
+          final node = Map<String, dynamic>.from(historyMap[cursor] as Map);
+          chain.add(node);
+          cursor = node['parentId'] as String?;
+        }
+        chain = chain.reversed.toList();
+      } else {
+        // Fallback: sort by timestamp
+        chain =
+            historyMap.values
+                .map((e) => Map<String, dynamic>.from(e as Map))
+                .toList()
+              ..sort(
+                (a, b) => ((a['timestamp'] ?? 0) as int).compareTo(
+                  (b['timestamp'] ?? 0) as int,
+                ),
+              );
+      }
+
       setState(() {
         _messages =
-            ordered.map((node) {
+            chain.map((node) {
               final role = node['role'] as String? ?? 'user';
               final content = node['content'] as String? ?? '';
               final modelId = node['model'] as String?;
@@ -400,16 +425,70 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
           sessionId = sess['socket_id'] as String?;
         } catch (_) {}
 
-        await client.postChatCompleted({
+        final completedRes = await client.postChatCompleted({
           'model': _selectedModelId,
           'messages': chain,
           if (modelItem != null) 'model_item': modelItem,
           'chat_id': _chatId,
-          if (sessionId != null) 'session_id': sessionId,
+          // Backend expects key to exist; send empty string if unknown
+          'session_id': sessionId ?? '',
           'id': _assistantPendingId,
         });
 
-        // Also persist final assistant message content back to chat history including ALL prior messages
+        // If server responded with message updates, merge into existing history (avoid wiping fields)
+        if (completedRes.isNotEmpty && completedRes['messages'] is List) {
+          try {
+            final existing = await client.getChatById(_chatId!);
+            final chatMap = Map<String, dynamic>.from(existing['chat'] as Map);
+            final historyMessages = Map<String, dynamic>.from(
+              (chatMap['history']?['messages'] as Map?) ?? {},
+            );
+            final serverMessages =
+                (completedRes['messages'] as List)
+                    .whereType<Map>()
+                    .map((e) => e.cast<String, dynamic>())
+                    .toList();
+
+            for (final m in serverMessages) {
+              final id = m['id'] as String?;
+              if (id == null) continue;
+              final prev = Map<String, dynamic>.from(
+                (historyMessages[id] as Map?)?.cast<String, dynamic>() ?? {},
+              );
+              historyMessages[id] = {...prev, ...m};
+            }
+
+            final flat =
+                historyMessages.values
+                    .whereType<Map>()
+                    .map((e) => e.cast<String, dynamic>())
+                    .where((m) => m['role'] != null)
+                    .toList()
+                  ..sort(
+                    (a, b) => ((a['timestamp'] ?? 0) as int).compareTo(
+                      (b['timestamp'] ?? 0) as int,
+                    ),
+                  );
+
+            await client.updateChat(
+              id: _chatId!,
+              chat: {
+                'models': [
+                  if ((_selectedModelId ?? '').isNotEmpty) _selectedModelId,
+                ],
+                'history': {
+                  'messages': historyMessages,
+                  'currentId': _assistantPendingId,
+                },
+                'messages': flat,
+                'params': chatMap['params'] ?? {},
+                'files': chatMap['files'] ?? [],
+              },
+            );
+          } catch (_) {}
+        }
+
+        // Persist final assistant message content back to chat history
         if (_chatId != null &&
             _assistantPendingId != null &&
             _lastUserMsgId != null) {
@@ -425,51 +504,17 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                   .map((m) => m.content)
                   .join();
           final ts = (DateTime.now().millisecondsSinceEpoch / 1000).floor();
-          // Fetch existing chat to merge full arrays/maps
+          // Update using authoritative history + messages created from history
           final existing = await client.getChatById(_chatId!);
           final chatMap = Map<String, dynamic>.from(existing['chat'] as Map);
-          final existingMessages = List<Map<String, dynamic>>.from(
-            (chatMap['messages'] as List? ?? []).cast<Map<String, dynamic>>(),
-          );
-          // Remove stub assistant, if present
-          final merged =
-              existingMessages
-                  .where((m) => (m['id'] ?? '') != _assistantPendingId)
-                  .toList();
-          // Ensure user node exists
-          final userExists = merged.any((m) => m['id'] == _lastUserMsgId);
-          if (!userExists) {
-            merged.add({
-              'id': _lastUserMsgId,
-              'parentId': _lastAssistantMsgId,
-              'childrenIds': [_assistantPendingId],
-              'role': 'user',
-              'content': _messages.firstWhere((m) => m.role == 'user').content,
-              'timestamp': ts,
-              'models': [if (modelId.isNotEmpty) modelId],
-            });
-          }
-          // Add final assistant node
-          merged.add({
-            'parentId': _lastUserMsgId,
-            'id': _assistantPendingId,
-            'childrenIds': [],
-            'role': 'assistant',
-            'content': assistantContent,
-            'model': modelId,
-            'modelName': modelName,
-            'modelIdx': 0,
-            'timestamp': ts,
-            'done': true,
-          });
 
-          // Merge history map
           final historyMessages = Map<String, dynamic>.from(
             (chatMap['history']?['messages'] as Map?) ?? {},
           );
+          // Ensure user message present and parent/children links
           historyMessages[_lastUserMsgId!] = {
             'id': _lastUserMsgId,
-            'parentId': _lastAssistantMsgId,
+            'parentId': historyMessages[_lastUserMsgId!]?['parentId'],
             'childrenIds': [_assistantPendingId],
             'role': 'user',
             'content': _messages.firstWhere((m) => m.role == 'user').content,
@@ -489,32 +534,85 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
             'done': true,
           };
 
+          // Convert history to flat messages (as WebUI does)
+          final flatMessages = <Map<String, dynamic>>[];
+          // naive: sort by timestamp
+          historyMessages.values
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .toList()
+            ..sort(
+              (a, b) => ((a['timestamp'] ?? 0) as int).compareTo(
+                (b['timestamp'] ?? 0) as int,
+              ),
+            )
+            ..forEach(flatMessages.add);
+
           await client.updateChat(
             id: _chatId!,
             chat: {
               'models': [if (modelId.isNotEmpty) modelId],
-              'messages': merged,
               'history': {
                 'messages': historyMessages,
                 'currentId': _assistantPendingId,
               },
+              'messages': flatMessages,
               'params': chatMap['params'] ?? {},
               'files': chatMap['files'] ?? [],
             },
           );
-          _lastAssistantMsgId = _assistantPendingId;
+          // assistant message id resolved; no further action needed here
         }
+      } catch (_) {}
+
+      // Try auto-generate title for new/untitled chats
+      try {
+        await _maybeGenerateTitle();
       } catch (_) {}
     } catch (e) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Error: $e')));
     } finally {
-      if (mounted)
+      if (mounted) {
         setState(() {
           _sending = false;
           _isThinking = false;
         });
+      }
+    }
+  }
+
+  Future<void> _maybeGenerateTitle() async {
+    if (_chatId == null) return;
+    if ((_selectedModelId ?? '').isEmpty) return;
+    final client = await ref.read(openWebUIClientProvider.future);
+    // Fetch current chat to check title and messages
+    final existing = await client.getChatById(_chatId!);
+    final chatMap = Map<String, dynamic>.from(existing['chat'] as Map);
+    final currentTitle = (chatMap['title'] as String?)?.trim() ?? '';
+    // Only generate if title is missing or default
+    if (currentTitle.isNotEmpty &&
+        currentTitle.toLowerCase() != 'untitled' &&
+        currentTitle.toLowerCase() != 'new chat') {
+      return;
+    }
+    // Build messages payload from local state as role/content pairs
+    final messages =
+        _messages.map((m) => {'role': m.role, 'content': m.content}).toList();
+    if (messages.isEmpty) return;
+    final generated = await client.generateTitle(
+      model: _selectedModelId!,
+      messages: messages,
+      chatId: _chatId,
+    );
+    if (generated == null || generated.trim().isEmpty) return;
+    final newTitle = generated.trim();
+    if (newTitle != currentTitle) {
+      await client.renameChat(id: _chatId!, title: newTitle);
+      // Refresh drawer list
+      if (mounted) {
+        ref.invalidate(chatsProvider);
+      }
     }
   }
 
@@ -547,30 +645,23 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                   ),
         ),
         centerTitle: true,
+        bottom:
+            _loadingChat
+                ? const PreferredSize(
+                  preferredSize: Size.fromHeight(2),
+                  child: LinearProgressIndicator(minHeight: 2),
+                )
+                : null,
         actions: [
           IconButton(
             tooltip: 'New chat',
             icon: const Icon(Icons.add),
             onPressed: () async {
-              final model = _selectedModelId;
-              if (model == null) return;
-              final client = await ref.read(openWebUIClientProvider.future);
-              final created = await client.createChat(
-                chat: {
-                  'id': const Uuid().v4(),
-                  'title': 'New Chat',
-                  'models': [model],
-                  'params': {},
-                  'history': {'currentId': null, 'messages': {}},
-                  'messages': [],
-                  'tags': [],
-                  'timestamp': DateTime.now().millisecondsSinceEpoch,
-                },
-              );
-              setState(() {
-                _chatId = created['id'] as String?;
-                _messages = [];
-              });
+              // Do not create a server chat until the first user message is sent
+              // Reset local state and navigate to route without chatId
+              if (context.mounted) {
+                context.go(ChatRoomScreen.routePath);
+              }
             },
           ),
           const SizedBox(width: 4),
@@ -659,8 +750,9 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                       openWebUIClientProvider.future,
                     );
                     await client.signOut();
-                    if (context.mounted)
+                    if (context.mounted) {
                       Navigator.of(context).popUntil((_) => true);
+                    }
                   } else if (v == 'settings') {
                     if (context.mounted) context.push('/app/settings');
                   } else if (v == 'archived') {
@@ -684,9 +776,10 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                           backgroundImage: imageProvider,
                           backgroundColor:
                               imageProvider == null
-                                  ? Theme.of(
-                                    context,
-                                  ).colorScheme.surfaceVariant.withOpacity(0.5)
+                                  ? Theme.of(context)
+                                      .colorScheme
+                                      .surfaceContainerHighest
+                                      .withOpacity(0.5)
                                   : null,
                           child:
                               imageProvider == null
@@ -761,7 +854,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                                         backgroundImage: _modelLogo(m.modelId),
                                         backgroundColor: Theme.of(context)
                                             .colorScheme
-                                            .surfaceVariant
+                                            .surfaceContainerHighest
                                             .withOpacity(0.5),
                                         child:
                                             _modelLogo(m.modelId) == null
@@ -992,10 +1085,12 @@ class _ModelSelectorPlaceholder extends StatelessWidget {
   const _ModelSelectorPlaceholder();
   @override
   Widget build(BuildContext context) {
-    final base = Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.25);
+    final base = Theme.of(
+      context,
+    ).colorScheme.surfaceContainerHighest.withOpacity(0.25);
     final highlight = Theme.of(
       context,
-    ).colorScheme.surfaceVariant.withOpacity(0.45);
+    ).colorScheme.surfaceContainerHighest.withOpacity(0.45);
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 220),
       child: Shimmer.fromColors(
