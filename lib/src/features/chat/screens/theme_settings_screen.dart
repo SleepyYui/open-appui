@@ -77,6 +77,7 @@ class ThemeSettingsScreen extends ConsumerWidget {
                   value: settings.useExactPrimaryColor,
                   onChanged: (v) async {
                     await settingsCtrl.setUseExactPrimaryColor(v);
+                    // Force rebuild using current seed on toggle
                     themeCtrl.setMode(theme.mode);
                   },
                 ),
@@ -88,7 +89,9 @@ class ThemeSettingsScreen extends ConsumerWidget {
                     width: 20,
                     height: 20,
                     decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primary,
+                      color:
+                          settings.seedColor ??
+                          Theme.of(context).colorScheme.primary,
                       shape: BoxShape.circle,
                       border: Border.all(
                         color: Theme.of(context).colorScheme.outlineVariant,
@@ -96,7 +99,9 @@ class ThemeSettingsScreen extends ConsumerWidget {
                     ),
                   ),
                   onTap: () async {
-                    Color picked = Theme.of(context).colorScheme.primary;
+                    Color picked =
+                        settings.seedColor ??
+                        Theme.of(context).colorScheme.primary;
                     final ok = await showDialog<bool>(
                       context: context,
                       builder:
@@ -123,9 +128,16 @@ class ThemeSettingsScreen extends ConsumerWidget {
                           ),
                     );
                     if (ok == true) {
-                      themeCtrl.setSeed(picked);
+                      // Persist chosen seed; do not immediately rebuild UI color if user wants tonal mapping off
+                      // We always store it, then: if "Use exact primary" is on, apply directly; else let scheme build from seed
                       await settingsCtrl.setSeedColor(picked);
                       await settingsCtrl.setUseDynamic(false);
+                      if (settings.useExactPrimaryColor) {
+                        themeCtrl.setSeed(picked);
+                      } else {
+                        // Rebuild using current mode to pick up new seed
+                        themeCtrl.setMode(theme.mode);
+                      }
                     }
                   },
                 ),
@@ -187,7 +199,7 @@ class ThemeSettingsScreen extends ConsumerWidget {
 
 class _ContrastDialog extends StatelessWidget {
   final String initial;
-  const _ContrastDialog({super.key, required this.initial});
+  const _ContrastDialog({required this.initial});
 
   @override
   Widget build(BuildContext context) {

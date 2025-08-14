@@ -40,7 +40,12 @@ class AppThemeController extends StateNotifier<AppThemeModel> {
   }
 
   void setMode(ThemeMode mode) {
-    state = state.copyWith(mode: mode);
+    // Recompute themes so changes in contrast / exact primary take effect immediately
+    state = AppThemeModel(
+      light: _buildLightTheme(),
+      dark: _buildDarkTheme(),
+      mode: mode,
+    );
   }
 
   void setSeed(Color seed) {
@@ -72,6 +77,10 @@ final appThemeProvider =
       ref.listen<AppSettingsModel>(appSettingsProvider, (_, next) {
         _contrastLevel = next.contrastLevel;
         _preferExactPrimary = next.useExactPrimaryColor;
+        // If exact primary is on and a seed is stored, apply directly
+        if (_preferExactPrimary && next.seedColor != null) {
+          _seedColor = next.seedColor!;
+        }
       });
       return AppThemeController();
     });
