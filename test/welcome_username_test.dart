@@ -9,7 +9,11 @@ void main() {
       const MaterialApp(home: Scaffold(body: ChatRoomScreen())),
     );
     await tester.pumpWidget(app);
-    // Initial empty state uses welcome placeholder headline
+    // On first frame, a shimmer placeholder is shown while loading
+    expect(find.byKey(const Key('modelSelectorPlaceholder')), findsOneWidget);
+    // Allow async _load to complete
+    await tester.pump(const Duration(milliseconds: 50));
+    // Then welcome placeholder should appear
     expect(find.textContaining('Welcome,'), findsOneWidget);
   });
 }

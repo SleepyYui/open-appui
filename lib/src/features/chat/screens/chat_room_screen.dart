@@ -73,7 +73,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   void initState() {
     super.initState();
     _chatId = widget.chatId;
-    _loadingChat = true;
+    _loadingChat = widget.chatId != null;
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
   }
 
@@ -84,26 +84,28 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
       setState(() {
         _chatId = widget.chatId;
         _messages = [];
-        _loadingChat = true;
+        _loadingChat = widget.chatId != null;
       });
       WidgetsBinding.instance.addPostFrameCallback((_) => _load());
     }
   }
 
   Future<void> _load() async {
-    setState(() => _loadingChat = true);
+    if (_chatId != null) {
+      setState(() => _loadingChat = true);
+    }
     // Prime session cache to avoid repeated /auth calls on initial build
     unawaited(ref.read(sessionUserProvider.future));
     final client = await ref.read(openWebUIClientProvider.future);
-    final models = await client.listModels();
-    setState(() {
-      _models = models;
-      _selectedModelId =
-          models.isNotEmpty ? models.first['id'] as String : null;
-    });
+    final modelsFuture = client.listModels();
+    final Future<Map<String, dynamic>?> chatFuture =
+        _chatId != null
+            ? client.getChatById(_chatId!)
+            : Future<Map<String, dynamic>?>.value(null);
 
-    if (_chatId != null) {
-      final chat = await client.getChatById(_chatId!);
+    // Await chat first so UI stops showing message shimmer as soon as messages are ready
+    final chat = await chatFuture;
+    if (chat != null) {
       final historyMap =
           (chat['chat']?['history']?['messages'] ?? {}) as Map<String, dynamic>;
       final currentId = chat['chat']?['history']?['currentId'] as String?;
@@ -149,7 +151,17 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
             }).toList();
       });
     }
-    if (mounted) setState(() => _loadingChat = false);
+    if (mounted && _chatId != null) setState(() => _loadingChat = false);
+
+    // Apply models once available (does not affect message shimmer)
+    final models = await modelsFuture;
+    if (mounted) {
+      setState(() {
+        _models = models;
+        _selectedModelId =
+            models.isNotEmpty ? models.first['id'] as String : null;
+      });
+    }
   }
 
   Future<void> _send() async {

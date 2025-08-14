@@ -11,8 +11,10 @@ void main() {
       const MaterialApp(home: Scaffold(body: ChatRoomScreen())),
     );
     await tester.pumpWidget(app);
-    // Initially we expect welcome placeholder (no model badge). This is a smoke test to ensure
-    // the widget tree builds; deeper integration requires mocking HTTP.
+    // Initially shimmer shows while loading
+    expect(find.byKey(const Key('modelSelectorPlaceholder')), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 50));
+    // Then welcome placeholder appears (no model badge yet)
     expect(find.textContaining('Welcome'), findsOneWidget);
   });
 }
