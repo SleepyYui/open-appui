@@ -95,39 +95,43 @@ class _ThemeSettingsScreenState extends ConsumerState<ThemeSettingsScreen> {
           Card(
             child: Column(
               children: [
-                SwitchListTile(
-                  title: const Text('Use system colors'),
-                  subtitle: const Text('Dynamic color on supported platforms'),
-                  value: settings.useDynamicAccent,
-                  onChanged: (v) async {
-                    themeCtrl.useDynamicAccent(v);
-                    await settingsCtrl.setUseDynamic(v);
-                  },
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  title: const Text('Apply wallpaper colors now'),
-                  subtitle: const Text('Use current system dynamic colors'),
-                  trailing: const Icon(Icons.palette_outlined),
-                  onTap: () async {
-                    final dismiss = await _showBlockingProgress(
-                      'Applying wallpaper colors...',
-                    );
-                    await settingsCtrl.setUseDynamic(true);
-                    await settingsCtrl.setUseExactPrimaryColor(false);
-                    themeCtrl.useDynamicAccent(true);
-                    themeCtrl.setMode(theme.mode);
-                    dismiss();
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Wallpaper colors applied'),
-                        ),
+                if (ref.watch(supportsDynamicColorProvider)) ...[
+                  SwitchListTile(
+                    title: const Text('Use system colors'),
+                    subtitle: const Text('Dynamic color (Android 12+)'),
+                    value: settings.useDynamicAccent,
+                    onChanged: (v) async {
+                      themeCtrl.useDynamicAccent(v);
+                      await settingsCtrl.setUseDynamic(v);
+                    },
+                  ),
+                  const Divider(height: 1),
+                ],
+                if (ref.watch(supportsDynamicColorProvider)) ...[
+                  ListTile(
+                    title: const Text('Apply wallpaper colors now'),
+                    subtitle: const Text('Use current system dynamic colors'),
+                    trailing: const Icon(Icons.palette_outlined),
+                    onTap: () async {
+                      final dismiss = await _showBlockingProgress(
+                        'Applying wallpaper colors...',
                       );
-                    }
-                  },
-                ),
-                const Divider(height: 1),
+                      await settingsCtrl.setUseDynamic(true);
+                      await settingsCtrl.setUseExactPrimaryColor(false);
+                      themeCtrl.useDynamicAccent(true);
+                      themeCtrl.setMode(theme.mode);
+                      dismiss();
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Wallpaper colors applied'),
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                  const Divider(height: 1),
+                ],
                 SwitchListTile(
                   title: const Text('Use exact primary color'),
                   subtitle: const Text('Avoid tonal mapping for primary'),

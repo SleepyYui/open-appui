@@ -719,10 +719,6 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                   borderRadius: BorderRadius.circular(16),
                 ),
                 itemBuilder: (ctx) {
-                  final role =
-                      (snapshot.data?['role'] as String?)?.toLowerCase();
-                  final bool isAdmin = role == 'admin';
-                  final bool isDebug = kDebugMode;
                   final items = <PopupMenuEntry<String>>[
                     const PopupMenuItem(
                       value: 'settings',
@@ -736,17 +732,6 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                       ),
                     ),
                   ];
-                  if (isDebug || isAdmin) {
-                    items.add(
-                      const PopupMenuItem(
-                        value: 'admin',
-                        child: _PopupRow(
-                          icon: Icons.admin_panel_settings_outlined,
-                          label: 'Admin Panel',
-                        ),
-                      ),
-                    );
-                  }
                   items.addAll(const [
                     PopupMenuDivider(),
                     PopupMenuItem(
@@ -769,8 +754,6 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                     if (context.mounted) context.push('/app/settings');
                   } else if (v == 'archived') {
                     if (context.mounted) context.push('/app/archived');
-                  } else if (v == 'admin') {
-                    if (context.mounted) context.push('/app/admin');
                   }
                 },
                 child: Padding(
@@ -791,7 +774,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                                   ? Theme.of(context)
                                       .colorScheme
                                       .surfaceContainerHighest
-                                      .withOpacity(0.5)
+                                      .withValues(alpha: 0.5)
                                   : null,
                           child:
                               imageProvider == null
@@ -867,7 +850,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                                         backgroundColor: Theme.of(context)
                                             .colorScheme
                                             .surfaceContainerHighest
-                                            .withOpacity(0.5),
+                                            .withValues(alpha: 0.5),
                                         child:
                                             _modelLogo(m.modelId) == null
                                                 ? const Icon(
@@ -887,7 +870,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                                           color: Theme.of(context)
                                               .colorScheme
                                               .onSurface
-                                              .withOpacity(0.7),
+                                              .withValues(alpha: 0.7),
                                         ),
                                       ),
                                     ],
@@ -1015,7 +998,9 @@ class _Dot extends StatelessWidget {
           width: 6,
           height: 6,
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+            color: Theme.of(
+              context,
+            ).colorScheme.onSurface.withValues(alpha: 0.6),
             shape: BoxShape.circle,
           ),
         ),
@@ -1048,7 +1033,7 @@ class _WelcomePlaceholder extends ConsumerWidget {
                   decoration: BoxDecoration(
                     color: Theme.of(
                       context,
-                    ).colorScheme.primary.withOpacity(0.12),
+                    ).colorScheme.primary.withValues(alpha: 0.12),
                     shape: BoxShape.circle,
                   ),
                   child: Icon(
@@ -1099,10 +1084,10 @@ class _ModelSelectorPlaceholder extends StatelessWidget {
   Widget build(BuildContext context) {
     final base = Theme.of(
       context,
-    ).colorScheme.surfaceContainerHighest.withOpacity(0.25);
+    ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.25);
     final highlight = Theme.of(
       context,
-    ).colorScheme.surfaceContainerHighest.withOpacity(0.45);
+    ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.45);
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 220),
       child: Shimmer.fromColors(

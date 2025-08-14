@@ -85,6 +85,9 @@ final appThemeProvider =
       return AppThemeController();
     });
 
+// Exposes whether dynamic (wallpaper) colors are currently supported on this device
+final supportsDynamicColorProvider = StateProvider<bool>((ref) => false);
+
 String _contrastLevel = 'standard';
 bool _preferExactPrimary = false;
 
@@ -106,7 +109,7 @@ ThemeData _buildLightTheme() {
         TargetPlatform.android: ZoomPageTransitionsBuilder(),
         TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
         TargetPlatform.linux: ZoomPageTransitionsBuilder(),
-        TargetPlatform.macOS: ZoomPageTransitionsBuilder(),
+        TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
         TargetPlatform.windows: ZoomPageTransitionsBuilder(),
       },
     ),

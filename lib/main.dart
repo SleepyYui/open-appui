@@ -62,6 +62,9 @@ class _OpenAppUIState extends ConsumerState<OpenAppUI> {
                 .read(appThemeProvider.notifier)
                 .setDynamicSchemes(light: lightDynamic, dark: darkDynamic);
             _appliedDynamic = true;
+            // Set capability flag: any platform that returns dynamic schemes supports it
+            final supported = (lightDynamic != null || darkDynamic != null);
+            ref.read(supportsDynamicColorProvider.notifier).state = supported;
           }
         });
         return MaterialApp.router(

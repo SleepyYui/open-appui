@@ -44,13 +44,13 @@ class _ReasoningCollapsibleState extends State<ReasoningCollapsible> {
               Icon(
                 _open ? Icons.expand_less_rounded : Icons.expand_more_rounded,
                 size: 18,
-                color: scheme.onSurface.withOpacity(0.7),
+                color: scheme.onSurface.withValues(alpha: 0.7),
               ),
               const SizedBox(width: 6),
               Text(
                 _summaryText(),
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: scheme.onSurface.withOpacity(0.7),
+                  color: scheme.onSurface.withValues(alpha: 0.7),
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -66,7 +66,9 @@ class _ReasoningCollapsibleState extends State<ReasoningCollapsible> {
                     padding: const EdgeInsets.only(top: 6, bottom: 6),
                     child: DecoratedBox(
                       decoration: BoxDecoration(
-                        color: scheme.surfaceContainerHighest.withOpacity(0.15),
+                        color: scheme.surfaceContainerHighest.withValues(
+                          alpha: 0.15,
+                        ),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Padding(

@@ -104,7 +104,7 @@ class ChatListDrawer extends ConsumerWidget {
                                 fontWeight: FontWeight.w600,
                                 color: Theme.of(
                                   context,
-                                ).colorScheme.onSurface.withOpacity(0.6),
+                                ).colorScheme.onSurface.withValues(alpha: 0.6),
                               ),
                             ),
                           ),
