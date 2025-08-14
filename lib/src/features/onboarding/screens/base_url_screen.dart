@@ -37,8 +37,6 @@ class _BaseUrlScreenState extends ConsumerState<BaseUrlScreen> {
 
     final client = await ref.read(openWebUIClientProvider.future);
     final url = _controller.text.trim();
-    // ignore: avoid_print
-    print('[BaseURL] set url=$url');
     await client.setBaseUrl(url);
     try {
       final ok = await client.verifyBaseUrl();
@@ -46,10 +44,6 @@ class _BaseUrlScreenState extends ConsumerState<BaseUrlScreen> {
       if (ok) {
         // If already have token, go straight in
         final t = await client.token;
-        // ignore: avoid_print
-        print(
-          '[BaseURL] verification OK, tokenPresent=${t != null && t.isNotEmpty}',
-        );
         if (t != null && t.isNotEmpty) {
           context.go(ChatRoomScreen.routePath);
         } else {
@@ -57,8 +51,6 @@ class _BaseUrlScreenState extends ConsumerState<BaseUrlScreen> {
         }
       }
     } catch (e) {
-      // ignore: avoid_print
-      print('[BaseURL] verification error: $e');
       setState(() => _error = e.toString());
     } finally {
       if (mounted) setState(() => _verifying = false);

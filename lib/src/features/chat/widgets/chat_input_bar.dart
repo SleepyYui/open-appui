@@ -17,16 +17,17 @@ class ChatInputBar extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
+    final enterToSend = ref.watch(appSettingsProvider).enterToSend;
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
       child: TextField(
         controller: controller,
         minLines: 1,
-        maxLines: 6,
-        textInputAction: TextInputAction.newline,
+        maxLines: enterToSend ? 1 : 6,
+        textInputAction:
+            enterToSend ? TextInputAction.send : TextInputAction.newline,
         onSubmitted: (_) async {
-          final settings = await ref.read(appSettingsProviderWithPrefs.future);
-          if (settings.state.enterToSend && !isSending) onSend();
+          if (enterToSend && !isSending) onSend();
         },
         decoration: InputDecoration(
           hintText: 'Message',

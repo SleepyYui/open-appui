@@ -6,21 +6,31 @@ class AppSettingsModel {
   final bool enterToSend;
   final bool useDynamicAccent;
   final Color? seedColor;
+  final bool reopenLastChatOnLaunch;
+  final bool autoReauthAfterPasswordChange;
 
   const AppSettingsModel({
     required this.enterToSend,
     required this.useDynamicAccent,
     required this.seedColor,
+    required this.reopenLastChatOnLaunch,
+    required this.autoReauthAfterPasswordChange,
   });
 
   AppSettingsModel copyWith({
     bool? enterToSend,
     bool? useDynamicAccent,
     Color? seedColor,
+    bool? reopenLastChatOnLaunch,
+    bool? autoReauthAfterPasswordChange,
   }) => AppSettingsModel(
     enterToSend: enterToSend ?? this.enterToSend,
     useDynamicAccent: useDynamicAccent ?? this.useDynamicAccent,
     seedColor: seedColor ?? this.seedColor,
+    reopenLastChatOnLaunch:
+        reopenLastChatOnLaunch ?? this.reopenLastChatOnLaunch,
+    autoReauthAfterPasswordChange:
+        autoReauthAfterPasswordChange ?? this.autoReauthAfterPasswordChange,
   );
 }
 
@@ -31,6 +41,8 @@ class AppSettingsController extends StateNotifier<AppSettingsModel> {
           enterToSend: true,
           useDynamicAccent: false,
           seedColor: null,
+          reopenLastChatOnLaunch: false,
+          autoReauthAfterPasswordChange: false,
         ),
       ) {
     _load();
@@ -41,15 +53,22 @@ class AppSettingsController extends StateNotifier<AppSettingsModel> {
   static const _kEnterToSend = 'enter_to_send';
   static const _kUseDynamic = 'use_dynamic_accent';
   static const _kSeedColor = 'seed_color';
+  static const _kReopenLastChat = 'reopen_last_chat_on_launch';
+  static const _kAutoReauthAfterPwd = 'auto_reauth_after_password_change';
+  static const _kLastOpenedChatId = 'last_opened_chat_id';
 
   Future<void> _load() async {
     final enter = _prefs.getBool(_kEnterToSend) ?? true;
     final dyn = _prefs.getBool(_kUseDynamic) ?? false;
     final seed = _prefs.getInt(_kSeedColor);
+    final reopen = _prefs.getBool(_kReopenLastChat) ?? false;
+    final autoReauth = _prefs.getBool(_kAutoReauthAfterPwd) ?? false;
     state = state.copyWith(
       enterToSend: enter,
       useDynamicAccent: dyn,
       seedColor: seed != null ? Color(seed) : null,
+      reopenLastChatOnLaunch: reopen,
+      autoReauthAfterPasswordChange: autoReauth,
     );
   }
 
@@ -70,6 +89,28 @@ class AppSettingsController extends StateNotifier<AppSettingsModel> {
       await _prefs.setInt(_kSeedColor, c.value);
     }
     state = state.copyWith(seedColor: c);
+  }
+
+  Future<void> setReopenLastChatOnLaunch(bool v) async {
+    await _prefs.setBool(_kReopenLastChat, v);
+    state = state.copyWith(reopenLastChatOnLaunch: v);
+  }
+
+  Future<void> setAutoReauthAfterPasswordChange(bool v) async {
+    await _prefs.setBool(_kAutoReauthAfterPwd, v);
+    state = state.copyWith(autoReauthAfterPasswordChange: v);
+  }
+
+  Future<void> setLastOpenedChatId(String? id) async {
+    if (id == null || id.isEmpty) {
+      await _prefs.remove(_kLastOpenedChatId);
+    } else {
+      await _prefs.setString(_kLastOpenedChatId, id);
+    }
+  }
+
+  Future<String?> getLastOpenedChatId() async {
+    return _prefs.getString(_kLastOpenedChatId);
   }
 }
 

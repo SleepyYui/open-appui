@@ -65,6 +65,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                         const MaterialPage(child: SettingsScreen()),
               ),
               GoRoute(
+                path: AccountSettingsScreen.routePath,
+                name: AccountSettingsScreen.routeName,
+                pageBuilder:
+                    (context, state) =>
+                        const MaterialPage(child: AccountSettingsScreen()),
+              ),
+              GoRoute(
                 path: ArchivedChatsScreen.routePath,
                 name: ArchivedChatsScreen.routeName,
                 pageBuilder:

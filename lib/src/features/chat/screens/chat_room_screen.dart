@@ -15,6 +15,7 @@ import '../widgets/reasoning_collapsible.dart';
 import '../widgets/shimmers.dart';
 import '../data/chat_repository.dart';
 import 'package:shimmer/shimmer.dart';
+import '../../../core/settings/app_settings.dart';
 
 class ChatRoomScreen extends ConsumerStatefulWidget {
   const ChatRoomScreen({super.key, this.chatId});
@@ -97,6 +98,15 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     // Prime session cache to avoid repeated /auth calls on initial build
     unawaited(ref.read(sessionUserProvider.future));
     final client = await ref.read(openWebUIClientProvider.future);
+    // Persist last opened chat id for optional reopening on app launch
+    try {
+      final settings = ref.read(appSettingsProvider);
+      if (settings.reopenLastChatOnLaunch && _chatId != null) {
+        await ref
+            .read(appSettingsProviderWithPrefs.future)
+            .then((c) => c.setLastOpenedChatId(_chatId));
+      }
+    } catch (_) {}
     final modelsFuture = client.listModels();
     final Future<Map<String, dynamic>?> chatFuture =
         _chatId != null
@@ -580,6 +590,17 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
       try {
         await _maybeGenerateTitle();
       } catch (_) {}
+      // Ensure chats drawer refreshes (especially after new title)
+      if (mounted) {
+        ref.invalidate(chatsProvider);
+        try {
+          if (_chatId != null) {
+            await ref
+                .read(appSettingsProvider.notifier)
+                .setLastOpenedChatId(_chatId);
+          }
+        } catch (_) {}
+      }
     } catch (e) {
       ScaffoldMessenger.of(
         context,
@@ -672,6 +693,11 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
               // Do not create a server chat until the first user message is sent
               // Reset local state and navigate to route without chatId
               if (context.mounted) {
+                try {
+                  await ref
+                      .read(appSettingsProvider.notifier)
+                      .setLastOpenedChatId(null);
+                } catch (_) {}
                 context.go(ChatRoomScreen.routePath);
               }
             },

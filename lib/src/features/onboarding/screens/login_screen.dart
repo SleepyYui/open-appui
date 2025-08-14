@@ -37,16 +37,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     });
     try {
       final client = await ref.read(openWebUIClientProvider.future);
-      // ignore: avoid_print
-      print('[Login] submit email=${_email.text.trim()}');
       await client.signIn(email: _email.text.trim(), password: _password.text);
-      // ignore: avoid_print
-      print('[Login] saved credentials, navigating to chat');
+      // If we arrived here after a password change with auto-reauth preference, continue to chat
       if (!mounted) return;
       context.go(ChatRoomScreen.routePath);
     } catch (e) {
-      // ignore: avoid_print
-      print('[Login] error: $e');
       setState(() => _error = e.toString());
     } finally {
       if (mounted) setState(() => _loading = false);

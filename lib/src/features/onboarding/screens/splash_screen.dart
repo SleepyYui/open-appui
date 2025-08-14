@@ -6,6 +6,7 @@ import '../../../core/api/openwebui_client.dart';
 import 'base_url_screen.dart';
 import 'login_screen.dart';
 import '../../chat/screens/chat_room_screen.dart';
+import '../../../core/settings/app_settings.dart';
 
 class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({super.key});
@@ -26,33 +27,47 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
 
   Future<void> _bootstrap() async {
     final client = await ref.read(openWebUIClientProvider.future);
+    final settingsCtrl = await ref.read(appSettingsProviderWithPrefs.future);
     final base = client.baseUrl;
-    // Debug trace for routing decisions (no secrets printed)
-    // ignore: avoid_print
-    print('[Splash] baseUrl=$base');
     if (base == null || base.isEmpty) {
       if (mounted) context.go(BaseUrlScreen.routePath);
       return;
     }
 
     final token = await client.token;
-    // ignore: avoid_print
-    print('[Splash] tokenPresent=${token != null && token.isNotEmpty}');
     if (token == null || token.isEmpty) {
       if (mounted) context.go(LoginScreen.routePath);
       return;
     }
 
     try {
-      // ignore: avoid_print
-      print('[Splash] validating session via /auths');
       await client.getSessionUser();
-      // ignore: avoid_print
-      print('[Splash] session valid');
-      if (mounted) context.go(ChatRoomScreen.routePath);
+      if (mounted) {
+        final reopen = settingsCtrl.state.reopenLastChatOnLaunch;
+        if (reopen) {
+          try {
+            final lastId = await settingsCtrl.getLastOpenedChatId();
+            if (lastId != null && lastId.isNotEmpty) {
+              context.go('${ChatRoomScreen.routePath}?chatId=$lastId');
+              return;
+            }
+            final chats = await client.listChats(page: 1);
+            if (chats.isNotEmpty) {
+              final sorted = List<Map<String, dynamic>>.from(chats)..sort(
+                (a, b) =>
+                    (b['updated_at'] as int).compareTo(a['updated_at'] as int),
+              );
+              final id = sorted.first['id'] as String?;
+              if (id != null && id.isNotEmpty) {
+                context.go('${ChatRoomScreen.routePath}?chatId=$id');
+                return;
+              }
+            }
+          } catch (_) {}
+        }
+        context.go(ChatRoomScreen.routePath);
+      }
     } catch (e) {
-      // ignore: avoid_print
-      print('[Splash] session invalid: $e');
       if (mounted) context.go(LoginScreen.routePath);
     }
   }

@@ -7,6 +7,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:open_appui/src/core/api/openwebui_client.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:open_appui/src/core/settings/app_settings.dart';
 
 class FakeOpenWebUIClient extends OpenWebUIClient {
   FakeOpenWebUIClient._(super.prefs, super.secure);
@@ -59,8 +60,13 @@ class FakeOpenWebUIClient extends OpenWebUIClient {
 
 Future<Widget> withFakeClient(Widget child) async {
   final fake = await FakeOpenWebUIClient.create();
+  final prefs = await SharedPreferences.getInstance();
+  final settings = AppSettingsController(prefs);
   return ProviderScope(
-    overrides: [openWebUIClientProvider.overrideWith((ref) async => fake)],
+    overrides: [
+      openWebUIClientProvider.overrideWith((ref) async => fake),
+      appSettingsProvider.overrideWith((ref) => settings),
+    ],
     child: child,
   );
 }

@@ -5,10 +5,20 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'src/app_router.dart';
 import 'src/core/theme/app_theme.dart';
 import 'src/core/settings/app_settings.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const ProviderScope(child: OpenAppUI()));
+  final prefs = await SharedPreferences.getInstance();
+  final appSettingsController = AppSettingsController(prefs);
+  runApp(
+    ProviderScope(
+      overrides: [
+        appSettingsProvider.overrideWith((ref) => appSettingsController),
+      ],
+      child: const OpenAppUI(),
+    ),
+  );
 }
 
 class OpenAppUI extends ConsumerStatefulWidget {
@@ -28,20 +38,19 @@ class _OpenAppUIState extends ConsumerState<OpenAppUI> {
     final theme = ref.watch(appThemeProvider);
     final router = ref.watch(appRouterProvider);
 
+    final settings = ref.watch(appSettingsProvider);
     // Apply settings after build to avoid provider modification during build
-    ref.watch(appSettingsProviderWithPrefs).whenData((ctrl) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        final t = ref.read(appThemeProvider.notifier);
-        if (_lastSeed != ctrl.state.seedColor && ctrl.state.seedColor != null) {
-          t.setSeed(ctrl.state.seedColor!);
-          _lastSeed = ctrl.state.seedColor;
-        }
-        if (_lastDynamic != ctrl.state.useDynamicAccent) {
-          t.useDynamicAccent(ctrl.state.useDynamicAccent);
-          _lastDynamic = ctrl.state.useDynamicAccent;
-        }
-      });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final t = ref.read(appThemeProvider.notifier);
+      if (_lastSeed != settings.seedColor && settings.seedColor != null) {
+        t.setSeed(settings.seedColor!);
+        _lastSeed = settings.seedColor;
+      }
+      if (_lastDynamic != settings.useDynamicAccent) {
+        t.useDynamicAccent(settings.useDynamicAccent);
+        _lastDynamic = settings.useDynamicAccent;
+      }
     });
 
     return DynamicColorBuilder(

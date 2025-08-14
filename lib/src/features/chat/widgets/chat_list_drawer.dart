@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../chat/screens/chat_room_screen.dart';
 import '../data/chat_repository.dart';
+import '../../../core/settings/app_settings.dart';
 import 'shimmers.dart';
 
 class ChatListDrawer extends ConsumerWidget {
@@ -127,8 +128,21 @@ class ChatListDrawer extends ConsumerWidget {
                                         Theme.of(context).colorScheme.onSurface,
                                   ),
                                 ),
-                                onTap: () {
+                                onTap: () async {
                                   Navigator.of(context).maybePop();
+                                  final id = chat['id'] as String?;
+                                  if (id != null) {
+                                    // remember last opened chat
+                                    try {
+                                      await ref
+                                          .read(
+                                            appSettingsProviderWithPrefs.future,
+                                          )
+                                          .then(
+                                            (c) => c.setLastOpenedChatId(id),
+                                          );
+                                    } catch (_) {}
+                                  }
                                   context.go(
                                     '${ChatRoomScreen.routePath}?chatId=${chat['id']}',
                                   );
