@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:flutter/foundation.dart';
 import '../../../core/api/openwebui_client.dart';
-import '../../../core/theme/app_theme.dart';
 import '../screens/chat_room_screen.dart';
 import '../../onboarding/screens/login_screen.dart';
-import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import '../../../core/settings/app_settings.dart';
+import 'theme_settings_screen.dart';
+import 'webview_screen.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -15,8 +16,6 @@ class SettingsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = ref.watch(appThemeProvider);
-    final controller = ref.read(appThemeProvider.notifier);
     final settings = ref.watch(appSettingsProvider);
     final settingsCtrl = ref.read(appSettingsProvider.notifier);
     return Scaffold(
@@ -108,76 +107,87 @@ class SettingsScreen extends ConsumerWidget {
                 ),
               ),
               const SizedBox(height: 12),
+              // Move admin panel access into Settings for admins/debug
+              FutureBuilder<Map<String, dynamic>>(
+                future: ref
+                    .read(openWebUIClientProvider.future)
+                    .then((c) => c.getSessionUser()),
+                builder: (context, sessionSnap) {
+                  final role =
+                      (sessionSnap.data?['role'] as String?)?.toLowerCase();
+                  final isAdmin = role == 'admin';
+                  return (isAdmin || kDebugMode)
+                      ? Card(
+                        child: ListTile(
+                          title: const Text('Admin Panel'),
+                          subtitle: const Text('Server info and tools'),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () => context.push('/app/admin'),
+                        ),
+                      )
+                      : const SizedBox.shrink();
+                },
+              ),
+              const SizedBox(height: 12),
               Card(
                 child: Column(
                   children: [
-                    SwitchListTile(
-                      title: const Text('Dark mode'),
-                      value: theme.mode == ThemeMode.dark,
-                      onChanged: (v) {
-                        controller.setMode(
-                          v ? ThemeMode.dark : ThemeMode.light,
-                        );
-                      },
+                    ListTile(
+                      title: const Text('Theme & appearance'),
+                      subtitle: const Text('Colors, contrast, backgrounds'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => context.push(ThemeSettingsScreen.routePath),
                     ),
                     const Divider(height: 1),
                     ListTile(
-                      title: const Text('Accent color'),
-                      subtitle: const Text('Pick a custom accent color'),
-                      trailing: Container(
-                        width: 20,
-                        height: 20,
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.primary,
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: Theme.of(context).colorScheme.outlineVariant,
-                          ),
-                        ),
-                      ),
+                      title: const Text('Change WebUI URL'),
+                      subtitle: const Text('Switch the Open WebUI server'),
+                      trailing: const Icon(Icons.chevron_right),
                       onTap: () async {
-                        Color picked = Theme.of(context).colorScheme.primary;
-                        final ok = await showDialog<bool>(
+                        final base = await ref
+                            .read(openWebUIClientProvider.future)
+                            .then((c) => c.baseUrl ?? '');
+                        final ctrl = TextEditingController(text: base);
+                        final saved = await showDialog<String?>(
                           context: context,
                           builder:
                               (ctx) => AlertDialog(
-                                title: const Text('Select accent color'),
-                                content: SingleChildScrollView(
-                                  child: ColorPicker(
-                                    pickerColor: picked,
-                                    onColorChanged: (c) => picked = c,
-                                    enableAlpha: false,
-                                    displayThumbColor: true,
+                                title: const Text('Open WebUI URL'),
+                                content: TextField(
+                                  controller: ctrl,
+                                  decoration: const InputDecoration(
+                                    labelText:
+                                        'Base URL (e.g. https://host:port)',
                                   ),
+                                  keyboardType: TextInputType.url,
+                                  autofocus: true,
                                 ),
                                 actions: [
                                   TextButton(
-                                    onPressed:
-                                        () => Navigator.of(ctx).pop(false),
+                                    onPressed: () => Navigator.of(ctx).pop(),
                                     child: const Text('Cancel'),
                                   ),
                                   FilledButton(
                                     onPressed:
-                                        () => Navigator.of(ctx).pop(true),
-                                    child: const Text('Apply'),
+                                        () => Navigator.of(
+                                          ctx,
+                                        ).pop(ctrl.text.trim()),
+                                    child: const Text('Save'),
                                   ),
                                 ],
                               ),
                         );
-                        if (ok == true) {
-                          controller.setSeed(picked);
-                          await settingsCtrl.setSeedColor(picked);
-                          await settingsCtrl.setUseDynamic(false);
+                        if (saved != null) {
+                          final client = await ref.read(
+                            openWebUIClientProvider.future,
+                          );
+                          await client.setBaseUrl(saved);
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Base URL updated')),
+                            );
+                          }
                         }
-                      },
-                    ),
-                    const Divider(height: 1),
-                    SwitchListTile(
-                      title: const Text('Use system dynamic color'),
-                      value: settings.useDynamicAccent,
-                      onChanged: (v) async {
-                        controller.useDynamicAccent(v);
-                        await settingsCtrl.setUseDynamic(v);
                       },
                     ),
                     const Divider(height: 1),
@@ -204,15 +214,18 @@ class SettingsScreen extends ConsumerWidget {
                 child: Column(
                   children: [
                     ListTile(
-                      title: const Text('Account'),
-                      subtitle: const Text('Profile and security settings'),
-                    ),
-                    ListTile(
                       title: const Text('Account settings'),
                       subtitle: const Text('Profile, API keys, password'),
                       trailing: const Icon(Icons.chevron_right),
                       onTap:
                           () => context.push(AccountSettingsScreen.routePath),
+                    ),
+                    const Divider(height: 1),
+                    ListTile(
+                      title: const Text('Open WebUI Settings'),
+                      subtitle: const Text('Manage settings in WebUI'),
+                      trailing: const Icon(Icons.open_in_new),
+                      onTap: () => context.push(WebViewScreen.routePath),
                     ),
                   ],
                 ),

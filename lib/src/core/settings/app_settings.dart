@@ -8,6 +8,8 @@ class AppSettingsModel {
   final Color? seedColor;
   final bool reopenLastChatOnLaunch;
   final bool autoReauthAfterPasswordChange;
+  final String contrastLevel; // 'standard' | 'medium' | 'high'
+  final bool useExactPrimaryColor; // override tonal mapping for primary
 
   const AppSettingsModel({
     required this.enterToSend,
@@ -15,6 +17,8 @@ class AppSettingsModel {
     required this.seedColor,
     required this.reopenLastChatOnLaunch,
     required this.autoReauthAfterPasswordChange,
+    required this.contrastLevel,
+    required this.useExactPrimaryColor,
   });
 
   AppSettingsModel copyWith({
@@ -23,6 +27,8 @@ class AppSettingsModel {
     Color? seedColor,
     bool? reopenLastChatOnLaunch,
     bool? autoReauthAfterPasswordChange,
+    String? contrastLevel,
+    bool? useExactPrimaryColor,
   }) => AppSettingsModel(
     enterToSend: enterToSend ?? this.enterToSend,
     useDynamicAccent: useDynamicAccent ?? this.useDynamicAccent,
@@ -31,6 +37,8 @@ class AppSettingsModel {
         reopenLastChatOnLaunch ?? this.reopenLastChatOnLaunch,
     autoReauthAfterPasswordChange:
         autoReauthAfterPasswordChange ?? this.autoReauthAfterPasswordChange,
+    contrastLevel: contrastLevel ?? this.contrastLevel,
+    useExactPrimaryColor: useExactPrimaryColor ?? this.useExactPrimaryColor,
   );
 }
 
@@ -43,6 +51,8 @@ class AppSettingsController extends StateNotifier<AppSettingsModel> {
           seedColor: null,
           reopenLastChatOnLaunch: false,
           autoReauthAfterPasswordChange: false,
+          contrastLevel: 'standard',
+          useExactPrimaryColor: false,
         ),
       ) {
     _load();
@@ -56,6 +66,8 @@ class AppSettingsController extends StateNotifier<AppSettingsModel> {
   static const _kReopenLastChat = 'reopen_last_chat_on_launch';
   static const _kAutoReauthAfterPwd = 'auto_reauth_after_password_change';
   static const _kLastOpenedChatId = 'last_opened_chat_id';
+  static const _kContrastLevel = 'contrast_level';
+  static const _kUseExactPrimary = 'use_exact_primary_color';
 
   Future<void> _load() async {
     final enter = _prefs.getBool(_kEnterToSend) ?? true;
@@ -63,12 +75,16 @@ class AppSettingsController extends StateNotifier<AppSettingsModel> {
     final seed = _prefs.getInt(_kSeedColor);
     final reopen = _prefs.getBool(_kReopenLastChat) ?? false;
     final autoReauth = _prefs.getBool(_kAutoReauthAfterPwd) ?? false;
+    final contrast = _prefs.getString(_kContrastLevel) ?? 'standard';
+    final exactPrimary = _prefs.getBool(_kUseExactPrimary) ?? false;
     state = state.copyWith(
       enterToSend: enter,
       useDynamicAccent: dyn,
       seedColor: seed != null ? Color(seed) : null,
       reopenLastChatOnLaunch: reopen,
       autoReauthAfterPasswordChange: autoReauth,
+      contrastLevel: contrast,
+      useExactPrimaryColor: exactPrimary,
     );
   }
 
@@ -99,6 +115,18 @@ class AppSettingsController extends StateNotifier<AppSettingsModel> {
   Future<void> setAutoReauthAfterPasswordChange(bool v) async {
     await _prefs.setBool(_kAutoReauthAfterPwd, v);
     state = state.copyWith(autoReauthAfterPasswordChange: v);
+  }
+
+  Future<void> setContrastLevel(String level) async {
+    final normalized =
+        (level == 'medium' || level == 'high') ? level : 'standard';
+    await _prefs.setString(_kContrastLevel, normalized);
+    state = state.copyWith(contrastLevel: normalized);
+  }
+
+  Future<void> setUseExactPrimaryColor(bool v) async {
+    await _prefs.setBool(_kUseExactPrimary, v);
+    state = state.copyWith(useExactPrimaryColor: v);
   }
 
   Future<void> setLastOpenedChatId(String? id) async {

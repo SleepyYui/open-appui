@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/foundation.dart';
 import '../../../core/api/openwebui_client.dart';
 
 class AdminPanelScreen extends ConsumerWidget {
@@ -26,7 +27,7 @@ class AdminPanelScreen extends ConsumerWidget {
             return Center(child: Text('Error: ${snap.error}'));
           }
           final config = snap.data ?? const {};
-          final debug = const bool.fromEnvironment('dart.vm.product') == false;
+          final debug = kDebugMode;
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
             children: [
@@ -47,6 +48,44 @@ class AdminPanelScreen extends ConsumerWidget {
                       ),
                       _KV('Models', (config['models']?.length ?? 0).toString()),
                       _KV('Auth', (config['auth'] ?? {}).toString()),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Live stats',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 8),
+                      FutureBuilder<int>(
+                        future: ref
+                            .read(openWebUIClientProvider.future)
+                            .then((c) => c.getActiveUsersCount()),
+                        builder: (context, snap) {
+                          final count = snap.data;
+                          if (count == null) {
+                            return const LinearProgressIndicator(minHeight: 2);
+                          }
+                          return Row(
+                            children: [
+                              const Icon(
+                                Icons.circle,
+                                size: 10,
+                                color: Color(0xFF22C55E),
+                              ),
+                              const SizedBox(width: 8),
+                              Text('Active users: $count'),
+                            ],
+                          );
+                        },
+                      ),
                     ],
                   ),
                 ),

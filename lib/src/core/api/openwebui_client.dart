@@ -56,6 +56,8 @@ class OpenWebUIClient {
         url.endsWith('/') ? url.substring(0, url.length - 1) : url;
     _log('setBaseUrl -> $normalized');
     await _prefs.setString(_kBaseUrlKey, normalized);
+    // Changing servers invalidates session cache
+    _cachedSessionUser = null;
   }
 
   Future<void> setToken(String token) async {

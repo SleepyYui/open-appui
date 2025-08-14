@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:flutter/foundation.dart';
 import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 
@@ -717,29 +718,26 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(16),
                 ),
-                itemBuilder:
-                    (ctx) => [
-                      const PopupMenuItem(
-                        value: 'settings',
-                        child: _PopupRow(
-                          icon: Icons.settings,
-                          label: 'Settings',
-                        ),
+                itemBuilder: (ctx) {
+                  final role =
+                      (snapshot.data?['role'] as String?)?.toLowerCase();
+                  final bool isAdmin = role == 'admin';
+                  final bool isDebug = kDebugMode;
+                  final items = <PopupMenuEntry<String>>[
+                    const PopupMenuItem(
+                      value: 'settings',
+                      child: _PopupRow(icon: Icons.settings, label: 'Settings'),
+                    ),
+                    const PopupMenuItem(
+                      value: 'archived',
+                      child: _PopupRow(
+                        icon: Icons.inventory_2_outlined,
+                        label: 'Archived Chats',
                       ),
-                      const PopupMenuItem(
-                        value: 'archived',
-                        child: _PopupRow(
-                          icon: Icons.inventory_2_outlined,
-                          label: 'Archived Chats',
-                        ),
-                      ),
-                      const PopupMenuItem(
-                        value: 'playground',
-                        child: _PopupRow(
-                          icon: Icons.smart_toy_outlined,
-                          label: 'Playground',
-                        ),
-                      ),
+                    ),
+                  ];
+                  if (isDebug || isAdmin) {
+                    items.add(
                       const PopupMenuItem(
                         value: 'admin',
                         child: _PopupRow(
@@ -747,41 +745,17 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                           label: 'Admin Panel',
                         ),
                       ),
-                      const PopupMenuDivider(),
-                      const PopupMenuItem(
-                        value: 'signout',
-                        child: _PopupRow(icon: Icons.logout, label: 'Sign Out'),
-                      ),
-                      const PopupMenuDivider(),
-                      PopupMenuItem(
-                        enabled: false,
-                        child: FutureBuilder<int>(
-                          future: ref
-                              .read(openWebUIClientProvider.future)
-                              .then((c) => c.getActiveUsersCount()),
-                          builder: (context, snap) {
-                            final count = snap.data ?? 0;
-                            return Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const _PresenceDot(),
-                                const SizedBox(width: 6),
-                                Text(
-                                  'Active: $count',
-                                  style: Theme.of(
-                                    context,
-                                  ).textTheme.labelSmall?.copyWith(
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onSurface.withOpacity(0.70),
-                                  ),
-                                ),
-                              ],
-                            );
-                          },
-                        ),
-                      ),
-                    ],
+                    );
+                  }
+                  items.addAll(const [
+                    PopupMenuDivider(),
+                    PopupMenuItem(
+                      value: 'signout',
+                      child: _PopupRow(icon: Icons.logout, label: 'Sign Out'),
+                    ),
+                  ]);
+                  return items;
+                },
                 onSelected: (v) async {
                   if (v == 'signout') {
                     final client = await ref.read(
@@ -1168,20 +1142,7 @@ class _ModelSelectorPlaceholder extends StatelessWidget {
   }
 }
 
-class _PresenceDot extends StatelessWidget {
-  const _PresenceDot();
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 8,
-      height: 8,
-      decoration: const BoxDecoration(
-        color: Color(0xFF22C55E), // refined green
-        shape: BoxShape.circle,
-      ),
-    );
-  }
-}
+// Presence dot removed; now shown in Admin Panel
 
 class _ModelSelector extends StatelessWidget {
   const _ModelSelector({

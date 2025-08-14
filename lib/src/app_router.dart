@@ -11,6 +11,8 @@ import 'features/onboarding/screens/splash_screen.dart';
 import 'features/chat/screens/settings_screen.dart';
 import 'features/chat/screens/archived_chats_screen.dart';
 import 'features/chat/screens/admin_panel_screen.dart';
+import 'features/chat/screens/theme_settings_screen.dart';
+import 'features/chat/screens/webview_screen.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -70,6 +72,20 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 pageBuilder:
                     (context, state) =>
                         const MaterialPage(child: AccountSettingsScreen()),
+              ),
+              GoRoute(
+                path: ThemeSettingsScreen.routePath,
+                name: ThemeSettingsScreen.routeName,
+                pageBuilder:
+                    (context, state) =>
+                        const MaterialPage(child: ThemeSettingsScreen()),
+              ),
+              GoRoute(
+                path: WebViewScreen.routePath,
+                name: WebViewScreen.routeName,
+                pageBuilder:
+                    (context, state) =>
+                        const MaterialPage(child: WebViewScreen()),
               ),
               GoRoute(
                 path: ArchivedChatsScreen.routePath,
